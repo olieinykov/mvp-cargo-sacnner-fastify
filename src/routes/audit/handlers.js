@@ -700,18 +700,19 @@ function runAudit(bol, marker, cargo, exterier) {
 	// 7. OTHER NOTES from each slot
 	// ─────────────────────────────────────────────
 
-	for (const note of (bolExt.otherNotes ?? [])) {
-		issues.push({ source: 'BOL', severity: 'WARNING', cfr: null, check: note.sign_name, message: note.meaning, fix: null });
-	}
-	for (const note of (markerExt.otherNotes ?? [])) {
-		issues.push({ source: 'PLACARD', severity: 'WARNING', cfr: null, check: note.sign_name, message: note.meaning, fix: null });
-	}
-	for (const note of (cargoExt.otherNotes ?? [])) {
-		issues.push({ source: 'CARGO', severity: 'WARNING', cfr: null, check: note.sign_name, message: note.meaning, fix: null });
-	}
-	for (const note of (extExt.otherNotes ?? [])) {
-		issues.push({ source: 'PLACARD', severity: 'WARNING', cfr: null, check: note.sign_name, message: note.meaning, fix: null });
-	}
+	// Guard: skip plain strings and objects missing sign_name or meaning
+	const pushNote = (source, note) => {
+		if (!note || typeof note !== 'object' || Array.isArray(note)) return;
+		const check   = typeof note.sign_name === 'string' ? note.sign_name.trim() : null;
+		const message = typeof note.meaning   === 'string' ? note.meaning.trim()   : null;
+		if (!check || !message) return;
+		issues.push({ source, severity: 'WARNING', cfr: null, check, message, fix: null });
+	};
+
+	for (const note of (bolExt.otherNotes    ?? [])) pushNote('BOL',     note);
+	for (const note of (markerExt.otherNotes  ?? [])) pushNote('PLACARD', note);
+	for (const note of (cargoExt.otherNotes   ?? [])) pushNote('CARGO',   note);
+	for (const note of (extExt.otherNotes     ?? [])) pushNote('PLACARD', note);
 
 	// ─────────────────────────────────────────────
 	// 8. SCORING & SUMMARY
