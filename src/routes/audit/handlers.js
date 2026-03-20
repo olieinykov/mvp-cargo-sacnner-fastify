@@ -380,8 +380,8 @@ function runAudit(bol, marker, cargo, exterier) {
 	const markerUN    = v(markerExt.unNumber);
 	const cargoUN     = v(cargoExt.unNumber);
 
-	// Normalise class strings for comparison (trim, lowercase)
-	const norm = (s) => (s ? String(s).trim().toLowerCase() : null);
+	// Normalise class strings for comparison (trim, lowercase, strip "class " prefix)
+	const norm = (s) => (s ? String(s).trim().toLowerCase().replace(/^class\s+/, '') : null);
 
 	// Normalise UN/NA numbers: strip "UN"/"NA" prefix, keep only digits
 	const normUN = (s) => (s ? String(s).trim().replace(/^(un|na)/i, '').trim() : null);
