@@ -1,4 +1,7 @@
 import { requireAnthropic } from '../../lib/cloudeClient.js';
+import { db } from '../../db/connection.js';
+import { audits } from '../../db/schema.js';
+import { desc } from 'drizzle-orm';
 
 // ==========================
 // Claude client
@@ -29,9 +32,9 @@ function buildSystemPrompt(imageType) {
 			'You receive a single image of a BOL / shipping paper and must analyze it according to US DOT / FMCSA hazmat rules (49 CFR 172.200–204). ' +
 			'Evaluate compliance using ONLY what is visible on the document. Specifically check:\n' +
 			'- Proper Shipping Name: exact DOT-authorized name, no unauthorized abbreviations.\n' +
-			'- Hazard Class / Division: numeric class (e.g., "3", "8", "5.2") following shipping name.\n' +
-			'- UN/NA Identification Number: format like "UN1170" or "NA1993".\n' +
-			'- Packing Group: Roman numerals I, II, or III where required.\n' +
+			'- Hazard Class / Division: numeric class (e.g., "3", "8", "5.2"). It may appear as a standalone column, OR embedded inline within the commodity description string (e.g. "UN3272, ESTERS N.O.S., 3, PG III" — here "3" is the hazard class). Extract it regardless of position.\n' +
+			'- UN/NA Identification Number: format like "UN1170" or "NA1993". May appear inline in the description string.\n' +
+			'- Packing Group: Roman numerals I, II, or III. May appear inline in the description string (e.g. "PG III" or just "III").\n' +
 			'- Total Quantity: amount and unit of measure for each hazmat line item.\n' +
 			'- HM Column Marking: "X" or "RQ" clearly marked in hazardous material column.\n' +
 			'- Entry Sequence: shipping name, hazard class, UN number, packing group in required order.\n' +
@@ -40,6 +43,7 @@ function buildSystemPrompt(imageType) {
 			'- RQ Notation: "RQ" present where reportable quantity applies.\n' +
 			'- Technical Name for N.O.S.: chemical name in parentheses for N.O.S. entries.\n' +
 			'- No Forbidden Combinations: obviously incompatible materials not listed for same vehicle.\n\n' +
+			'IMPORTANT: For unNumber, hazardClass, and packingGroup — always scan the full commodity description text, not just dedicated columns. These values are often written inline as a single string like "UN3272, ESTERS N.O.S., (1-METHOXY-2-PROPANOL ACETATE) 3, PG III" where UN=3272, class=3, PG=III.\n\n' +
 			'You MUST respond strictly in JSON with this exact shape. Do not include any text outside of JSON.\n' +
 			'Every field except otherNotes must be an object with "mainValue" and "meaning".\n' +
 			'"mainValue" is the extracted value (string, boolean, or null).\n' +
@@ -339,6 +343,9 @@ function runAudit(bol, marker, cargo, exterier) {
 	// Normalise class strings for comparison (trim, lowercase)
 	const norm = (s) => (s ? String(s).trim().toLowerCase() : null);
 
+	// Normalise UN/NA numbers: strip "UN"/"NA" prefix, keep only digits
+	const normUN = (s) => (s ? String(s).trim().replace(/^(un|na)/i, '').trim() : null);
+
 	// ─────────────────────────────────────────────
 	// 1. BOL FIELD VALIDATION (49 CFR 172.200–204)
 	// ─────────────────────────────────────────────
@@ -379,7 +386,7 @@ function runAudit(bol, marker, cargo, exterier) {
 		});
 	}
 
-	// CRITICAL: missing emergency phone
+	// CRITICAL: missing emergency phone (per spec: no emergency phone = CRITICAL / OOS level)
 	if (!v(bolExt.emergencyPhone)) {
 		issues.push({
 			source: 'BOL',
@@ -416,6 +423,7 @@ function runAudit(bol, marker, cargo, exterier) {
 	}
 
 	// MAJOR: entry sequence non-compliant
+	// Only flag when explicitly false — null means Claude couldn't determine, avoid false positive
 	if (v(bolExt.entrySequenceCompliant) === false) {
 		issues.push({
 			source: 'BOL',
@@ -428,7 +436,25 @@ function runAudit(bol, marker, cargo, exterier) {
 	}
 
 	// ─────────────────────────────────────────────
-	// 2. BOL-TO-PLACARD CROSS-MATCH (49 CFR 172.504)
+	// 2. PROPER SHIPPING NAME VERIFICATION (49 CFR 172.101 / 172.202)
+	// Claude extracts isValid from BOL — if false, shipping name may be wrong/abbreviated.
+	// Full cross-reference against DOT HazMat Table is done by Claude vision;
+	// here we surface the verdict as a MINOR (abbreviation/spelling) or MAJOR (wrong name).
+	// ─────────────────────────────────────────────
+
+	if (v(bolExt.isValid) === false) {
+		issues.push({
+			source: 'BOL',
+			severity: 'MAJOR',
+			cfr: '49 CFR 172.202(a)(1)',
+			check: 'Proper Shipping Name (172.101)',
+			message: 'BOL hazmat entry flagged as non-compliant — proper shipping name may be incorrect, abbreviated, or not matching the DOT Hazardous Materials Table (49 CFR 172.101).',
+			fix: 'Verify the exact DOT-authorized Proper Shipping Name from 49 CFR 172.101 and update the BOL accordingly. Unauthorized abbreviations are not permitted.',
+		});
+	}
+
+	// ─────────────────────────────────────────────
+	// 3. BOL-TO-PLACARD CROSS-MATCH (49 CFR 172.504)
 	// ─────────────────────────────────────────────
 
 	if (bolClass && markerClass && norm(bolClass) !== norm(markerClass)) {
@@ -436,13 +462,13 @@ function runAudit(bol, marker, cargo, exterier) {
 			source: 'CROSS',
 			severity: 'CRITICAL',
 			cfr: '49 CFR 172.504',
-			check: 'BOL-Placard Match (172.504)',
+			check: 'BOL-Placard Class Match (172.504)',
 			message: `BOL shows Class ${bolClass} but placard shows Class ${markerClass}. Hazard class mismatch.`,
 			fix: `Replace placard with the correct Class ${bolClass} placard on all 4 sides of the trailer.`,
 		});
 	}
 
-	if (bolUN && markerUN && norm(bolUN) !== norm(markerUN)) {
+	if (bolUN && markerUN && normUN(bolUN) !== normUN(markerUN)) {
 		issues.push({
 			source: 'CROSS',
 			severity: 'CRITICAL',
@@ -454,7 +480,7 @@ function runAudit(bol, marker, cargo, exterier) {
 	}
 
 	// ─────────────────────────────────────────────
-	// 3. BOL-TO-PACKAGE CROSS-MATCH
+	// 4. BOL-TO-PACKAGE CROSS-MATCH (49 CFR 172.301 / 172.400)
 	// ─────────────────────────────────────────────
 
 	if (bolClass && cargoClass && norm(bolClass) !== norm(cargoClass)) {
@@ -468,7 +494,7 @@ function runAudit(bol, marker, cargo, exterier) {
 		});
 	}
 
-	if (bolUN && cargoUN && norm(bolUN) !== norm(cargoUN)) {
+	if (bolUN && cargoUN && normUN(bolUN) !== normUN(cargoUN)) {
 		issues.push({
 			source: 'CROSS',
 			severity: 'CRITICAL',
@@ -491,7 +517,7 @@ function runAudit(bol, marker, cargo, exterier) {
 	}
 
 	// ─────────────────────────────────────────────
-	// 4. COMPATIBILITY CHECK (49 CFR 177.848)
+	// 5. COMPATIBILITY CHECK (49 CFR 177.848)
 	// ─────────────────────────────────────────────
 
 	// Collect all classes visible across BOL, placard, cargo
@@ -515,7 +541,7 @@ function runAudit(bol, marker, cargo, exterier) {
 	}
 
 	// ─────────────────────────────────────────────
-	// 5. PLACARD CONDITION CHECKS
+	// 6. PLACARD CONDITION CHECKS
 	// ─────────────────────────────────────────────
 
 	if (!extExt.placardingPresent?.mainValue) {
@@ -531,6 +557,7 @@ function runAudit(bol, marker, cargo, exterier) {
 
 	const placardCond = v(extExt.placardingCondition);
 	if (placardCond === 'damaged') {
+		// Damaged = unreadable at inspection → CRITICAL (OOS level per spec)
 		issues.push({
 			source: 'PLACARD',
 			severity: 'CRITICAL',
@@ -540,6 +567,7 @@ function runAudit(bol, marker, cargo, exterier) {
 			fix: 'Replace damaged placards with new, legible ones before departure.',
 		});
 	} else if (placardCond === 'blurry') {
+		// Faded but readable → MINOR per spec ("faded but readable placard")
 		issues.push({
 			source: 'PLACARD',
 			severity: 'MINOR',
@@ -551,6 +579,7 @@ function runAudit(bol, marker, cargo, exterier) {
 	}
 
 	if (!v(markerExt.fourSidedPlacementVerified)) {
+		// Cannot verify from photo — WARNING, not a confirmed violation
 		issues.push({
 			source: 'PLACARD',
 			severity: 'WARNING',
@@ -561,7 +590,8 @@ function runAudit(bol, marker, cargo, exterier) {
 		});
 	}
 
-	if (!v(markerExt.correctOrientation)) {
+	// Only flag orientation if explicitly false — null means not visible in photo, skip to avoid false positive
+	if (v(markerExt.correctOrientation) === false) {
 		issues.push({
 			source: 'PLACARD',
 			severity: 'MINOR',
@@ -573,20 +603,10 @@ function runAudit(bol, marker, cargo, exterier) {
 	}
 
 	// ─────────────────────────────────────────────
-	// 6. CARGO / LOAD SECUREMENT
+	// 7. CARGO / LOAD SECUREMENT
 	// ─────────────────────────────────────────────
 
-	if (!v(cargoExt.loadSecured)) {
-		issues.push({
-			source: 'CARGO',
-			severity: 'CRITICAL',
-			cfr: '49 CFR 177.834(a)',
-			check: 'Load Securement',
-			message: 'Cargo does not appear to be properly secured against shifting during transport.',
-			fix: 'Secure all cargo with appropriate tie-downs, straps, or blocking before departure.',
-		});
-	}
-
+	// Leaks/damage = CRITICAL (OOS level — do not depart)
 	if (v(extExt.damagesOrLeaksObserved)) {
 		issues.push({
 			source: 'CARGO',
@@ -598,7 +618,21 @@ function runAudit(bol, marker, cargo, exterier) {
 		});
 	}
 
-	if (!v(cargoExt.noShiftingHazards)) {
+	// Load not secured = WARNING per spec ("load securement could be improved" is listed under WARNING examples)
+	// Only flag if explicitly false — null means cargo photo inconclusive
+	if (v(cargoExt.loadSecured) === false) {
+		issues.push({
+			source: 'CARGO',
+			severity: 'WARNING',
+			cfr: '49 CFR 177.834(a)',
+			check: 'Load Securement',
+			message: 'Cargo does not appear to be properly secured against shifting during transport.',
+			fix: 'Secure all cargo with appropriate tie-downs, straps, or blocking before departure.',
+		});
+	}
+
+	// Shifting hazards = WARNING per spec
+	if (v(cargoExt.noShiftingHazards) === false) {
 		issues.push({
 			source: 'CARGO',
 			severity: 'WARNING',
@@ -701,11 +735,52 @@ export async function createAudit(request, reply) {
 
 	const audit = runAudit(bolResult, markerResult, cargoResult, exterierResult);
 
-	return reply.send({
+	const auditResponse = {
 		bol:      bolResult,
 		marker:   markerResult,
 		cargo:    cargoResult,
 		exterier: exterierResult,
 		audit,
+	};
+
+	let savedId = null;
+	try {
+		const [saved] = await db.insert(audits).values({
+			response:  auditResponse,
+			is_passed: String(audit.is_passed),
+			score:     String(audit.score),
+		}).returning({ id: audits.id });
+		savedId = saved.id;
+	} catch (err) {
+		// Не блокируем ответ если БД недоступна — логируем и идём дальше
+		console.error('Failed to save audit to DB:', err.message);
+	}
+
+	return reply.send({
+		id: savedId,
+		...auditResponse,
 	});
+}
+
+// ==========================
+// GET /audit
+// ==========================
+ 
+export async function getAudits(request, reply) {
+	try {
+		const rows = await db
+			.select({
+				id:         audits.id,
+				is_passed:  audits.is_passed,
+				score:      audits.score,
+				created_at: audits.created_at,
+				response:   audits.response,
+			})
+			.from(audits)
+			.orderBy(desc(audits.created_at));
+ 
+		return reply.send(rows);
+	} catch (err) {
+		return reply.code(502).send({ error: `Failed to fetch audits: ${err.message}` });
+	}
 }

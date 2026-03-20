@@ -1,8 +1,10 @@
-import { pgTable, uuid, varchar, timestamp } from 'drizzle-orm/pg-core';
+import { pgTable, uuid, jsonb, timestamp, text } from 'drizzle-orm/pg-core';
 
-export const profiles = pgTable('profiles', {
-	userId: uuid('user_id').primaryKey().notNull(),
-	email: varchar('email', { length: 255 }).notNull(),
-	username: varchar('username', { length: 255 }),
-	createdAt: timestamp('created_at').defaultNow().notNull(),
+export const audits = pgTable('audits', {
+  id:         uuid('id').primaryKey().defaultRandom(),
+  load_id:    text('load_id'),                          
+  response:   jsonb('response').notNull(),              
+  is_passed:  text('is_passed').notNull(),              
+  score:      text('score').notNull(),                  
+  created_at: timestamp('created_at').defaultNow().notNull(),
 });

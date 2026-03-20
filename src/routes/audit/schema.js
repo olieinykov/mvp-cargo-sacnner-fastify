@@ -1,3 +1,24 @@
+export const getAuditsSchema = {
+	tags: ['Audit'],
+	summary: 'Get all audits',
+	description: 'Returns list of all audits ordered by creation date descending',
+	response: {
+		200: {
+			type: 'array',
+			items: {
+				type: 'object',
+				properties: {
+					id:         { type: 'string', format: 'uuid' },
+					is_passed:  { type: 'string' },
+					score:      { type: 'string' },
+					created_at: { type: 'string' },
+					response:   { type: 'object', additionalProperties: true },
+				},
+			},
+		},
+	},
+};
+
 export const createAuditSchema = {
 	tags: ['Audit'],
 	summary: 'Create new audit',
