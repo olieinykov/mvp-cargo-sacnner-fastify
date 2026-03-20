@@ -26,34 +26,60 @@ function toArray(field) {
 // ==========================
 
 function buildSystemPrompt(imageType) {
+	// Shared hazmat class reference injected into all prompts
+	const HAZMAT_CLASS_REFERENCE =
+		'HAZMAT CLASS REFERENCE — for identifying classes from labels and BOL text:\n' +
+		'- Class 3   | Flammable Liquids        | Red diamond, flame symbol, "3" at bottom\n' +
+		'- Class 5.2 | Organic Peroxides         | Yellow/red diamond\n' +
+		'- Class 8   | Corrosives               | Black-and-white diamond, corrosion symbol\n' +
+		'- Class 9   | Miscellaneous            | White diamond, black stripes at TOP only\n' +
+		'- Class 2.1 | Flammable Gas            | Red diamond, flame symbol\n' +
+		'- Class 2.2 | Non-Flammable Gas        | Green diamond\n' +
+		'- Class 2.3 | Poison Gas               | White diamond, skull symbol\n' +
+		'- Class 4.1 | Flammable Solid          | Red-and-white striped diamond\n' +
+		'- Class 4.2 | Spontaneously Combustible| Red-and-white diamond\n' +
+		'- Class 4.3 | Dangerous When Wet       | Blue diamond\n' +
+		'- Class 5.1 | Oxidizer                 | Yellow diamond, flame-over-circle symbol\n' +
+		'- Class 6.1 | Poison / Toxic           | White diamond, skull-and-crossbones\n' +
+		'- Class 7   | Radioactive              | Yellow-and-white diamond, trefoil symbol\n\n' +
+		'GHS vs DOT — CRITICAL:\n' +
+		'- GHS pictograms: RED border, white background, black symbol — on product labels. NOT DOT class labels.\n' +
+		'- DOT labels: SOLID-COLOR diamonds with class NUMBER at bottom corner.\n' +
+		'- If labels unclear or too small — set hazardClass to null and lower confidence. Do NOT guess.\n\n';
+
 	if (imageType === 'bolPhoto') {
 		return (
 			'You are a computer vision assistant for a Hazmat Load Audit System. ' +
-			'You receive a single image of a BOL / shipping paper and must analyze it according to US DOT / FMCSA hazmat rules (49 CFR 172.200–204). ' +
-			'Evaluate compliance using ONLY what is visible on the document. Specifically check:\n' +
-			'- Proper Shipping Name: exact DOT-authorized name, no unauthorized abbreviations.\n' +
-			'- Hazard Class / Division: numeric class (e.g., "3", "8", "5.2"). It may appear as a standalone column, OR embedded inline within the commodity description string (e.g. "UN3272, ESTERS N.O.S., 3, PG III" — here "3" is the hazard class). Extract it regardless of position.\n' +
-			'- UN/NA Identification Number: format like "UN1170" or "NA1993". May appear inline in the description string.\n' +
-			'- Packing Group: Roman numerals I, II, or III. May appear inline in the description string (e.g. "PG III" or just "III").\n' +
-			'- Total Quantity: amount and unit of measure for each hazmat line item.\n' +
-			'- HM Column Marking: "X" or "RQ" clearly marked in hazardous material column.\n' +
-			'- Entry Sequence: shipping name, hazard class, UN number, packing group in required order.\n' +
-			'- 24-Hour Emergency Phone: monitored phone number (e.g., CHEMTREC 800-424-9300).\n' +
-			'- Shipper Certification: signed statement of proper classification/packaging/etc.\n' +
-			'- RQ Notation: "RQ" present where reportable quantity applies.\n' +
-			'- Technical Name for N.O.S.: chemical name in parentheses for N.O.S. entries.\n' +
-			'- No Forbidden Combinations: obviously incompatible materials not listed for same vehicle.\n\n' +
-			'IMPORTANT: For unNumber, hazardClass, and packingGroup — always scan the full commodity description text, not just dedicated columns. These values are often written inline as a single string like "UN3272, ESTERS N.O.S., (1-METHOXY-2-PROPANOL ACETATE) 3, PG III" where UN=3272, class=3, PG=III.\n\n' +
-			'You MUST respond strictly in JSON with this exact shape. Do not include any text outside of JSON.\n' +
-			'Every field except otherNotes must be an object with "mainValue" and "meaning".\n' +
-			'"mainValue" is the extracted value (string, boolean, or null).\n' +
-			'"meaning" is a short human-readable explanation of what that value means in DOT/FMCSA context.\n' +
-			'"otherNotes" must be an array of { "sign_name": string, "meaning": string } objects ' +
-			'for any compliance-relevant findings that do not fit the named fields above (e.g. RQ notation, forbidden combinations, N.O.S. technical names). Use empty array [] if none.\n\n' +
+			'You receive a single image of a BOL / shipping paper. ' +
+			'READ ALL VALUES ONLY FROM THE ACTUAL DOCUMENT IN THE IMAGE. Never use memory or assumptions.\n\n' +
+			'Specifically check:\n' +
+			'- Proper Shipping Name: exact DOT-authorized name.\n' +
+			'- Hazard Class / Division: numeric class (e.g., "2.2", "3", "8", "9").\n' +
+			'- UN/NA Identification Number: 4-digit number after "UN" or "NA".\n' +
+			'- Packing Group: Roman numerals I, II, or III where required.\n' +
+			'- HM Column Marking: "X" or "RQ" marking in hazardous material column.\n' +
+			'- Entry Sequence: shipping name, hazard class, UN number, packing group order.\n' +
+			'- 24-Hour Emergency Phone: monitored phone number.\n' +
+			'- Shipper Certification: signed statement at bottom of document.\n' +
+			'- Technical Name for N.O.S.: chemical name in parentheses.\n\n' +
+			'EXTRACTION RULES:\n' +
+			'- Scan ALL text in the document including small print, handwriting, and multi-line entries.\n' +
+			'- UN number, hazard class, and packing group may appear inline within commodity description text.\n' +
+			'- Example inline format: "COMPRESSED GAS, N.O.S. (contains X), 2.2, UN1956" — class=2.2, UN=1956.\n' +
+			'- Report ONLY values you can actually read from this specific document image.\n' +
+			'- If multiple hazmat entries exist, report the primary one; list additional UN numbers comma-separated.\n\n' +
+			'FIELD DEFINITIONS:\n' +
+			'- isValid: true if ALL required hazmat fields are present and BOL appears DOT-compliant. false if critical fields missing.\n' +
+			'- properShippingNameValid: true for any recognized DOT name from 49 CFR 172.101 including "COMPRESSED GAS, N.O.S.", "ESTERS, N.O.S.", "FLAMMABLE LIQUID, N.O.S.", "CORROSIVE LIQUID, N.O.S.", "PAINT", "ENVIRONMENTALLY HAZARDOUS SUBSTANCE, SOLID, N.O.S." and similar. false ONLY if clearly fabricated or misspelled. null if uncertain.\n' +
+			'- entrySequenceCompliant: true if entry follows DOT order (name → class → UN → PG). false if order differs. null if uncertain.\n' +
+			'- hmColumnMarked: true if X, RQ, or any hazmat marking is visible next to the hazmat line item anywhere on the document.\n\n' +
+			HAZMAT_CLASS_REFERENCE +
+			'Respond ONLY with this JSON shape:\n' +
 			'{\n' +
 			'  "slotName": "bol",\n' +
 			'  "extracted": {\n' +
 			'    "isValid":                    { "mainValue": false,  "meaning": "" },\n' +
+			'    "properShippingNameValid":    { "mainValue": null,   "meaning": "" },\n' +
 			'    "unNumber":                   { "mainValue": null,   "meaning": "" },\n' +
 			'    "hazardClass":                { "mainValue": null,   "meaning": "" },\n' +
 			'    "packingGroup":               { "mainValue": null,   "meaning": "" },\n' +
@@ -72,20 +98,15 @@ function buildSystemPrompt(imageType) {
 	if (imageType === 'markerPhoto') {
 		return (
 			'You are a computer vision assistant for a Hazmat Load Audit System. ' +
-			'You receive a single image of a truck / trailer placard or marker on the vehicle exterior and must analyze it according to US DOT / FMCSA hazmat rules (49 CFR 172.500–560). ' +
-			'Evaluate compliance using ONLY what is visible. Specifically check:\n' +
-			'- Correct Placard Class: placard hazard class matches BOL hazard class.\n' +
-			'- UN Number Display: for bulk shipments, UN number on placard matches BOL.\n' +
-			'- Four-Sided Placement: placards visible on front, rear, and both sides (as far as the photo allows).\n' +
+			'You receive a single image of a truck / trailer placard. ' +
+			'READ ALL VALUES ONLY FROM WHAT IS PHYSICALLY VISIBLE IN THIS IMAGE. Never use memory.\n\n' +
+			'Specifically check:\n' +
+			'- UN Number: 4-digit number displayed on the placard.\n' +
+			'- Hazard Class: identify from placard color, symbol, and class number using the reference below.\n' +
 			'- Placard Condition: readable, not faded/obscured, correct diamond orientation (point-up).\n' +
-			'- DANGEROUS Placard: used correctly if multiple hazard classes each exceed 1,000 lbs.\n' +
-			'- Subsidiary Hazard Placards: present where required by subsidiary hazards.\n\n' +
-			'You MUST respond strictly in JSON with this exact shape. Do not include any text outside of JSON.\n' +
-			'Every field except otherNotes must be an object with "mainValue" and "meaning".\n' +
-			'"mainValue" is the extracted value (string, boolean, or null).\n' +
-			'"meaning" is a short human-readable explanation of what that value means in DOT/FMCSA context.\n' +
-			'"otherNotes" must be an array of { "sign_name": string, "meaning": string } objects ' +
-			'for any compliance-relevant findings that do not fit the named fields (e.g. DANGEROUS placard, subsidiary hazard placards). Use empty array [] if none.\n\n' +
+			'- Four-Sided Placement: placards visible on all sides (as far as the photo allows).\n\n' +
+			HAZMAT_CLASS_REFERENCE +
+			'Respond ONLY with this JSON shape:\n' +
 			'{\n' +
 			'  "slotName": "placard",\n' +
 			'  "extracted": {\n' +
@@ -106,19 +127,22 @@ function buildSystemPrompt(imageType) {
 	// cargoPhoto
 	return (
 		'You are a computer vision assistant for a Hazmat Load Audit System. ' +
-		'You receive a single image of cargo / load inside or on the vehicle and must analyze it according to US DOT / FMCSA hazmat rules. ' +
-		'Evaluate load verification and securement. Specifically check:\n' +
-		'- Package Markings Match BOL: visible UN number and proper shipping name on packages.\n' +
-		'- Package Labels Match BOL: hazard class labels on packages.\n' +
-		'- Load Securement: cargo properly secured, no visible shifting hazards, meets FMCSA rules.\n' +
-		'- Material Compatibility: no incompatible materials loaded adjacent to each other.\n' +
-		'- Orientation Compliance: "THIS SIDE UP" arrows and orientation markings respected.\n\n' +
-		'You MUST respond strictly in JSON with this exact shape. Do not include any text outside of JSON.\n' +
-		'Every field except otherNotes must be an object with "mainValue" and "meaning".\n' +
-		'"mainValue" is the extracted value (string, boolean, or null).\n' +
-		'"meaning" is a short human-readable explanation of what that value means in DOT/FMCSA context.\n' +
-		'"otherNotes" must be an array of { "sign_name": string, "meaning": string } objects ' +
-		'for any compliance-relevant findings that do not fit the named fields (e.g. orientation markings, compatibility issues). Use empty array [] if none.\n\n' +
+		'You receive a single image of cargo inside a vehicle. ' +
+		'READ ALL VALUES ONLY FROM WHAT IS PHYSICALLY VISIBLE IN THIS IMAGE. Never use memory.\n\n' +
+		'Specifically check:\n' +
+		'- UN Number: 4-digit number on package/drum labels if visible.\n' +
+		'- Hazard Class: from DOT diamond labels only (not GHS pictograms).\n' +
+		'- Package Labels: DOT hazard class diamond labels present on packages.\n' +
+		'- Load Securement: cargo secured against shifting.\n' +
+		'- Material Compatibility: incompatible materials not loaded together.\n\n' +
+		'SECUREMENT RULES:\n' +
+		'- Securement = any of: ratchet straps, belts, chains, load bars, cages, nets, shrink wrap.\n' +
+		'- If straps/belts visible even partially → loadSecured = true.\n' +
+		'- Cargo on pallets/cradles appearing stable → positive securement indicator.\n' +
+		'- Set loadSecured = false ONLY if cargo clearly loose with zero restraint visible.\n' +
+		'- Dark image + stable cargo → loadSecured = true with lower confidence.\n\n' +
+		HAZMAT_CLASS_REFERENCE +
+		'Respond ONLY with this JSON shape:\n' +
 		'{\n' +
 		'  "slotName": "intrier",\n' +
 		'  "extracted": {\n' +
@@ -144,6 +168,12 @@ function buildExterierSystemPrompt() {
 		'Evaluate ONLY what is visible on the exterior. Specifically check:\n' +
 		'- Placarding: whether hazmat placards are present and their condition.\n' +
 		'- Damages or leaks: any visible physical damage or hazmat leakage on exterior surfaces.\n\n' +
+		'PLACARDING CONDITION RULES — placardingCondition must be one of: "good", "blurry", "damaged", "unknown".\n' +
+		'- "good": the placard diamond label is readable and numbers/class are visible, even if the metal mounting frame around it is worn, bent, or dirty.\n' +
+		'- "blurry": placard text is partially obscured or faded but still somewhat readable.\n' +
+		'- "damaged": the placard label itself is physically torn, missing, or so deteriorated the class/UN number cannot be read. A worn metal holder does NOT make the placard damaged.\n' +
+		'- "unknown": placard not visible or cannot be assessed.\n' +
+		'- Judge the PLACARD LABEL condition only — ignore the condition of the mounting hardware.\n\n' +
 		'You MUST respond strictly in JSON with this exact shape. Do not include any text outside of JSON.\n' +
 		'Every field except otherNotes must be an object with "mainValue" and "meaning".\n' +
 		'"mainValue" is the extracted value (string, boolean, or null).\n' +
@@ -175,7 +205,7 @@ async function callClaude(systemPrompt, imageBuffer, mimetype, userText) {
 	try {
 		response = await getClient().messages.create({
 			model: process.env.CLAUDE_VISION_MODEL,
-			max_tokens: 1024,
+			max_tokens: 4096,
 			system: systemPrompt,
 			messages: [
 				{
@@ -222,11 +252,21 @@ async function callClaude(systemPrompt, imageBuffer, mimetype, userText) {
 }
 
 async function analyzeImageWithClaude(imageBuffer, mimetype, imageType) {
+	const userText = imageType === 'bolPhoto'
+		? 'Carefully examine every part of this BOL document. ' +
+		  'Find and extract: UN number (4 digits after "UN" or "NA"), ' +
+		  'hazard class (number like 2, 2.2, 3, 8, 9), ' +
+		  'packing group (Roman numerals I, II, III), ' +
+		  'HM column marking (X or RQ next to hazmat line). ' +
+		  'These may be in narrow columns, inline in description text, handwritten, or small print. ' +
+		  'Report ONLY what you actually read from this document. Respond ONLY with JSON.'
+		: 'Analyze this image and respond ONLY with JSON.';
+
 	return callClaude(
 		buildSystemPrompt(imageType),
 		imageBuffer,
 		mimetype,
-		'Analyze this image according to the provided hazmat checklist and respond ONLY with JSON.',
+		userText,
 	);
 }
 
@@ -399,7 +439,15 @@ function runAudit(bol, marker, cargo, exterier) {
 	}
 
 	// MAJOR: missing packing group
-	if (!v(bolExt.packingGroup)) {
+	// Class 2 gases (2.1, 2.2, 2.3) and Class 7 do NOT require packing group
+	const bolClassNorm = norm(bolClass);
+	const isPG_exempt = bolClassNorm && (bolClassNorm.startsWith('2') || bolClassNorm === '7');
+	const pgValue = v(bolExt.packingGroup);
+	const packingGroupMissing = !pgValue ||
+		String(pgValue).trim() === '—' ||
+		String(pgValue).trim() === '-';
+
+	if (packingGroupMissing && !isPG_exempt) {
 		issues.push({
 			source: 'BOL',
 			severity: 'MAJOR',
@@ -422,7 +470,7 @@ function runAudit(bol, marker, cargo, exterier) {
 		});
 	}
 
-	// MAJOR: entry sequence non-compliant
+	// MAJOR: entry sequence non-compliant — per spec "improper entry sequence on BOL" = MAJOR
 	// Only flag when explicitly false — null means Claude couldn't determine, avoid false positive
 	if (v(bolExt.entrySequenceCompliant) === false) {
 		issues.push({
@@ -437,19 +485,18 @@ function runAudit(bol, marker, cargo, exterier) {
 
 	// ─────────────────────────────────────────────
 	// 2. PROPER SHIPPING NAME VERIFICATION (49 CFR 172.101 / 172.202)
-	// Claude extracts isValid from BOL — if false, shipping name may be wrong/abbreviated.
-	// Full cross-reference against DOT HazMat Table is done by Claude vision;
-	// here we surface the verdict as a MINOR (abbreviation/spelling) or MAJOR (wrong name).
+	// Per spec: abbreviated/minor spelling = MINOR, not MAJOR.
+	// Uses dedicated properShippingNameValid field — NOT isValid which reflects overall BOL compliance.
 	// ─────────────────────────────────────────────
 
-	if (v(bolExt.isValid) === false) {
+	if (v(bolExt.properShippingNameValid) === false) {
 		issues.push({
 			source: 'BOL',
-			severity: 'MAJOR',
+			severity: 'MINOR',
 			cfr: '49 CFR 172.202(a)(1)',
 			check: 'Proper Shipping Name (172.101)',
-			message: 'BOL hazmat entry flagged as non-compliant — proper shipping name may be incorrect, abbreviated, or not matching the DOT Hazardous Materials Table (49 CFR 172.101).',
-			fix: 'Verify the exact DOT-authorized Proper Shipping Name from 49 CFR 172.101 and update the BOL accordingly. Unauthorized abbreviations are not permitted.',
+			message: 'Proper shipping name on BOL appears incorrect, abbreviated, or does not match the DOT Hazardous Materials Table (49 CFR 172.101).',
+			fix: 'Verify the exact DOT-authorized Proper Shipping Name from 49 CFR 172.101. Unauthorized abbreviations are not permitted.',
 		});
 	}
 
@@ -555,7 +602,13 @@ function runAudit(bol, marker, cargo, exterier) {
 		});
 	}
 
-	const placardCond = v(extExt.placardingCondition);
+	// Placard condition — markerExt (dedicated placard photo) is primary source.
+	// extExt.placardingCondition only used as fallback if markerExt has no data.
+	const markerPlacardCond = v(markerExt.placardCondition);
+	const extPlacardCond    = v(extExt.placardingCondition);
+	const placardCond = (markerPlacardCond && markerPlacardCond !== 'unknown')
+		? markerPlacardCond
+		: extPlacardCond;
 	if (placardCond === 'damaged') {
 		// Damaged = unreadable at inspection → CRITICAL (OOS level per spec)
 		issues.push({
