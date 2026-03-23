@@ -9,6 +9,8 @@ const fastify = Fastify({
 	logger: true,
 });
 
+
+console.log("config", config)
 await fastify.register(corsPlugin);
 await fastify.register(swagger, {
 	openapi: {
