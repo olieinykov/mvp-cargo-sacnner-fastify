@@ -1,7 +1,7 @@
 import { requireAnthropic } from '../../lib/cloudeClient.js';
 import { db } from '../../db/connection.js';
 import { audits } from '../../db/schema.js';
-import { desc } from 'drizzle-orm';
+import { count, desc } from 'drizzle-orm';
 
 // ==========================
 // Claude client
@@ -821,19 +821,39 @@ export async function createAudit(request, reply) {
 // ==========================
  
 export async function getAudits(request, reply) {
-	try {
-		const rows = await db
-			.select({
-				id:         audits.id,
-				is_passed:  audits.is_passed,
-				score:      audits.score,
-				created_at: audits.created_at,
-				response:   audits.response,
-			})
-			.from(audits)
-			.orderBy(desc(audits.created_at));
+	const { page = 1, limit = 20 } = request.query;
+	const offset = (page - 1) * limit;
  
-		return reply.send(rows);
+	try {
+		const [rows, [{ total }]] = await Promise.all([
+			db
+				.select({
+					id:         audits.id,
+					is_passed:  audits.is_passed,
+					score:      audits.score,
+					created_at: audits.created_at,
+					response:   audits.response,
+				})
+				.from(audits)
+				.orderBy(desc(audits.created_at))
+				.limit(limit)
+				.offset(offset),
+			db.select({ total: count() }).from(audits),
+		]);
+ 
+		const totalPages = Math.ceil(total / limit);
+ 
+		return reply.send({
+			data: rows,
+			pagination: {
+				total,
+				page,
+				limit,
+				totalPages,
+				hasNextPage: page < totalPages,
+				hasPrevPage: page > 1,
+			},
+		});
 	} catch (err) {
 		return reply.code(502).send({ error: `Failed to fetch audits: ${err.message}` });
 	}

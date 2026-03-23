@@ -1,18 +1,41 @@
 export const getAuditsSchema = {
 	tags: ['Audit'],
 	summary: 'Get all audits',
-	description: 'Returns list of all audits ordered by creation date descending',
+	description: 'Returns paginated list of audits ordered by creation date descending',
+	querystring: {
+		type: 'object',
+		properties: {
+			page:  { type: 'integer', minimum: 1, default: 1 },
+			limit: { type: 'integer', minimum: 1, maximum: 100, default: 20 },
+		},
+	},
 	response: {
 		200: {
-			type: 'array',
-			items: {
-				type: 'object',
-				properties: {
-					id:         { type: 'string', format: 'uuid' },
-					is_passed:  { type: 'string' },
-					score:      { type: 'string' },
-					created_at: { type: 'string' },
-					response:   { type: 'object', additionalProperties: true },
+			type: 'object',
+			properties: {
+				data: {
+					type: 'array',
+					items: {
+						type: 'object',
+						properties: {
+							id:         { type: 'string', format: 'uuid' },
+							is_passed:  { type: 'string' },
+							score:      { type: 'string' },
+							created_at: { type: 'string' },
+							response:   { type: 'object', additionalProperties: true },
+						},
+					},
+				},
+				pagination: {
+					type: 'object',
+					properties: {
+						total:       { type: 'integer' },
+						page:        { type: 'integer' },
+						limit:       { type: 'integer' },
+						totalPages:  { type: 'integer' },
+						hasNextPage: { type: 'boolean' },
+						hasPrevPage: { type: 'boolean' },
+					},
 				},
 			},
 		},
