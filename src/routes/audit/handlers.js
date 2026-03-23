@@ -162,6 +162,8 @@ function buildSystemPrompt(imageType) {
 	);
 }
 
+// TODO: exterior slot temporarily disabled
+/*
 function buildExterierSystemPrompt() {
 	return (
 		'You are analyzing trailer exterior photos for hazmat placarding/condition evidence.\n' +
@@ -193,13 +195,22 @@ function buildExterierSystemPrompt() {
 		'}'
 	);
 }
+*/
 
 // ==========================
 // Claude API calls
 // ==========================
 
-async function callClaude(systemPrompt, imageBuffer, mimetype, userText) {
-	const base64Data = encodeImageToBase64(imageBuffer);
+// files — array of { buffer, mimetype }
+async function callClaude(systemPrompt, files, userText) {
+	const imageBlocks = files.map(({ buffer, mimetype }) => ({
+		type: 'image',
+		source: {
+			type: 'base64',
+			media_type: mimetype,
+			data: encodeImageToBase64(buffer),
+		},
+	}));
 
 	let response;
 	try {
@@ -211,18 +222,8 @@ async function callClaude(systemPrompt, imageBuffer, mimetype, userText) {
 				{
 					role: 'user',
 					content: [
-						{
-							type: 'image',
-							source: {
-								type: 'base64',
-								media_type: mimetype,
-								data: base64Data,
-							},
-						},
-						{
-							type: 'text',
-							text: userText,
-						},
+						...imageBlocks,
+						{ type: 'text', text: userText },
 					],
 				},
 			],
@@ -251,7 +252,8 @@ async function callClaude(systemPrompt, imageBuffer, mimetype, userText) {
 	return parsed;
 }
 
-async function analyzeImageWithClaude(imageBuffer, mimetype, imageType) {
+// files — array of { _buf, mimetype }
+async function analyzeImageWithClaude(files, imageType) {
 	const userText = imageType === 'bolPhoto'
 		? 'Carefully examine every part of this BOL document. ' +
 		  'Find and extract: UN number (4 digits after "UN" or "NA"), ' +
@@ -260,30 +262,17 @@ async function analyzeImageWithClaude(imageBuffer, mimetype, imageType) {
 		  'HM column marking (X or RQ next to hazmat line). ' +
 		  'These may be in narrow columns, inline in description text, handwritten, or small print. ' +
 		  'Report ONLY what you actually read from this document. Respond ONLY with JSON.'
-		: 'Analyze this image and respond ONLY with JSON.';
+		: 'Analyze all provided images together and respond ONLY with JSON.';
 
 	return callClaude(
 		buildSystemPrompt(imageType),
-		imageBuffer,
-		mimetype,
+		files.map((f) => ({ buffer: f._buf, mimetype: f.mimetype })),
 		userText,
 	);
 }
 
-async function analyzeExterierWithClaude(imageBuffer, mimetype) {
-	const result = await callClaude(
-		buildExterierSystemPrompt(),
-		imageBuffer,
-		mimetype,
-		'Analyze this trailer exterior image and respond ONLY with the specified JSON.',
-	);
-
-	if (result.slotName !== 'exterier') {
-		throw Object.assign(new Error('Claude exterier response does not match expected schema.'), { statusCode: 502 });
-	}
-
-	return result;
-}
+// TODO: exterior slot temporarily disabled
+// async function analyzeExterierWithClaude(files) { ... }
 
 // ==========================
 // Audit logic — Rules Engine
@@ -361,13 +350,14 @@ function recommendPlacards(classes) {
 	return recommendations;
 }
 
-function runAudit(bol, marker, cargo, exterier) {
+function runAudit(bol, marker, cargo/*, exterier*/) {
 	const issues = [];
 
 	const bolExt    = bol.extracted      ?? {};
 	const markerExt = marker.extracted   ?? {};
 	const cargoExt  = cargo.extracted    ?? {};
-	const extExt    = exterier.extracted ?? {};
+	// const extExt = exterier.extracted ?? {}; // TODO: exterior slot temporarily disabled
+	const extExt    = {};
 
 	// Convenience: get mainValue safely
 	const v = (field) => field?.mainValue ?? null;
@@ -591,26 +581,13 @@ function runAudit(bol, marker, cargo, exterier) {
 	// 6. PLACARD CONDITION CHECKS
 	// ─────────────────────────────────────────────
 
-	if (!extExt.placardingPresent?.mainValue) {
-		issues.push({
-			source: 'PLACARD',
-			severity: 'CRITICAL',
-			cfr: '49 CFR 172.504(a)',
-			check: 'Placard Present',
-			message: 'No hazmat placards detected on vehicle exterior.',
-			fix: 'Affix the required hazmat placards on all 4 sides of the trailer before departure.',
-		});
-	}
+	// TODO: exterior disabled — placardingPresent check skipped
+	// if (!extExt.placardingPresent?.mainValue) { issues.push({ ... }); }
 
-	// Placard condition — markerExt (dedicated placard photo) is primary source.
-	// extExt.placardingCondition only used as fallback if markerExt has no data.
+	// TODO: exterior disabled — placardCond fallback from extExt removed
 	const markerPlacardCond = v(markerExt.placardCondition);
-	const extPlacardCond    = v(extExt.placardingCondition);
-	const placardCond = (markerPlacardCond && markerPlacardCond !== 'unknown')
-		? markerPlacardCond
-		: extPlacardCond;
+	const placardCond = (markerPlacardCond && markerPlacardCond !== 'unknown') ? markerPlacardCond : null;
 	if (placardCond === 'damaged') {
-		// Damaged = unreadable at inspection → CRITICAL (OOS level per spec)
 		issues.push({
 			source: 'PLACARD',
 			severity: 'CRITICAL',
@@ -620,7 +597,6 @@ function runAudit(bol, marker, cargo, exterier) {
 			fix: 'Replace damaged placards with new, legible ones before departure.',
 		});
 	} else if (placardCond === 'blurry') {
-		// Faded but readable → MINOR per spec ("faded but readable placard")
 		issues.push({
 			source: 'PLACARD',
 			severity: 'MINOR',
@@ -659,17 +635,8 @@ function runAudit(bol, marker, cargo, exterier) {
 	// 7. CARGO / LOAD SECUREMENT
 	// ─────────────────────────────────────────────
 
-	// Leaks/damage = CRITICAL (OOS level — do not depart)
-	if (v(extExt.damagesOrLeaksObserved)) {
-		issues.push({
-			source: 'CARGO',
-			severity: 'CRITICAL',
-			cfr: '49 CFR 173.24(b)',
-			check: 'Leaks / Damage',
-			message: 'Visible damage or hazmat leakage observed on vehicle exterior.',
-			fix: 'Do not depart. Identify and contain the leak, inspect all packages, and repair damage before transport.',
-		});
-	}
+	// TODO: exterior disabled — damagesOrLeaksObserved check skipped
+	// if (v(extExt.damagesOrLeaksObserved)) { issues.push({ ... }); }
 
 	// Load not secured = WARNING per spec ("load securement could be improved" is listed under WARNING examples)
 	// Only flag if explicitly false — null means cargo photo inconclusive
@@ -712,7 +679,7 @@ function runAudit(bol, marker, cargo, exterier) {
 	for (const note of (bolExt.otherNotes    ?? [])) pushNote('BOL',     note);
 	for (const note of (markerExt.otherNotes  ?? [])) pushNote('PLACARD', note);
 	for (const note of (cargoExt.otherNotes   ?? [])) pushNote('CARGO',   note);
-	for (const note of (extExt.otherNotes     ?? [])) pushNote('PLACARD', note);
+	// for (const note of (extExt.otherNotes ?? [])) pushNote('PLACARD', note); // TODO: exterior disabled
 
 	// ─────────────────────────────────────────────
 	// 8. SCORING & SUMMARY
@@ -752,48 +719,53 @@ function runAudit(bol, marker, cargo, exterier) {
 // ==========================
 
 export async function createAudit(request, reply) {
-	const { bol, placard, intrier, exterier } = request.body;
+	const { bol, placard, intrier/*, exterier*/ } = request.body; // TODO: exterior slot temporarily disabled
 
-	const bolFile      = toArray(bol)[0];
-	const placardFile  = toArray(placard)[0];
-	const intierFile   = toArray(intrier)[0];
-	const exterierFile = toArray(exterier)[0];
+	const bolFiles      = toArray(bol);
+	const placardFiles  = toArray(placard);
+	const intierFiles   = toArray(intrier);
+	// const exterierFiles = toArray(exterier);
 
-	const files = [
-		{ file: bolFile,      name: 'bol' },
-		{ file: placardFile,  name: 'placard' },
-		{ file: intierFile,   name: 'intrier' },
-		{ file: exterierFile, name: 'exterier' },
+	const slots = [
+		{ files: bolFiles,      name: 'bol' },
+		{ files: placardFiles,  name: 'placard' },
+		{ files: intierFiles,   name: 'intrier' },
+		// { files: exterierFiles, name: 'exterier' }, // TODO: exterior disabled
 	];
 
-	for (const { file, name } of files) {
-		if (!file.mimetype || !file.mimetype.startsWith('image/')) {
-			return reply.code(400).send({ error: `Field "${name}" must be an image (image/*). Got: ${file.mimetype}` });
+	for (const { files, name } of slots) {
+		if (files.length === 0) {
+			return reply.code(400).send({ error: `Field "${name}" is required.` });
 		}
-		if (!file._buf || file._buf.length === 0) {
-			return reply.code(400).send({ error: `Field "${name}" is empty.` });
+		for (const file of files) {
+			if (!file.mimetype || !file.mimetype.startsWith('image/')) {
+				return reply.code(400).send({ error: `Field "${name}" must be an image (image/*). Got: ${file.mimetype}` });
+			}
+			if (!file._buf || file._buf.length === 0) {
+				return reply.code(400).send({ error: `Field "${name}" contains an empty file.` });
+			}
 		}
 	}
 
-	let bolResult, markerResult, cargoResult, exterierResult;
+	let bolResult, markerResult, cargoResult;
 	try {
-		[bolResult, markerResult, cargoResult, exterierResult] = await Promise.all([
-			analyzeImageWithClaude(bolFile._buf,      bolFile.mimetype,      'bolPhoto'),
-			analyzeImageWithClaude(placardFile._buf,  placardFile.mimetype,  'markerPhoto'),
-			analyzeImageWithClaude(intierFile._buf,   intierFile.mimetype,   'cargoPhoto'),
-			analyzeExterierWithClaude(exterierFile._buf, exterierFile.mimetype),
+		[bolResult, markerResult, cargoResult] = await Promise.all([
+			analyzeImageWithClaude(bolFiles,     'bolPhoto'),
+			analyzeImageWithClaude(placardFiles, 'markerPhoto'),
+			analyzeImageWithClaude(intierFiles,  'cargoPhoto'),
+			// analyzeExterierWithClaude(exterierFiles), // TODO: exterior disabled
 		]);
 	} catch (err) {
 		return reply.code(err.statusCode ?? 502).send({ error: err.message });
 	}
 
-	const audit = runAudit(bolResult, markerResult, cargoResult, exterierResult);
+	const audit = runAudit(bolResult, markerResult, cargoResult/*, exterierResult*/);
 
 	const auditResponse = {
 		bol:      bolResult,
 		marker:   markerResult,
 		cargo:    cargoResult,
-		exterier: exterierResult,
+		// exterier: exterierResult, // TODO: exterior disabled
 		audit,
 	};
 
@@ -806,7 +778,6 @@ export async function createAudit(request, reply) {
 		}).returning({ id: audits.id });
 		savedId = saved.id;
 	} catch (err) {
-		// Не блокируем ответ если БД недоступна — логируем и идём дальше
 		console.error('Failed to save audit to DB:', err.message);
 	}
 

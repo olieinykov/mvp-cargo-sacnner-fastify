@@ -49,7 +49,7 @@ export const createAuditSchema = {
 	consumes: ['multipart/form-data'],
 	body: {
 		type: 'object',
-		required: ['bol', 'placard', 'intrier', 'exterier'],
+		required: ['bol', 'placard', 'intrier'/*, 'exterier'*/],
 		properties: {
 			bol: {
 				// With multipart uploads the same field may be provided once (object)
@@ -131,32 +131,32 @@ export const createAuditSchema = {
 					},
 				],
 			},
-			exterier: {
-				anyOf: [
-					{
-						type: 'object',
-						required: ['filename', 'mimetype'],
-						properties: {
-							filename: { type: 'string' },
-							mimetype: { type: 'string' },
-							_buf: { type: 'object' },
-						},
-					},
-					{
-						type: 'array',
-						maxItems: 3,
-						items: {
-							type: 'object',
-							required: ['filename', 'mimetype'],
-							properties: {
-								filename: { type: 'string' },
-								mimetype: { type: 'string' },
-								_buf: { type: 'object' },
-							},
-						},
-					},
-				],
-			},
+			//exterier: {
+			//	anyOf: [
+			//		{
+			//			type: 'object',
+			//			required: ['filename', 'mimetype'],
+			//			properties: {
+			//				filename: { type: 'string' },
+			//				mimetype: { type: 'string' },
+			//				_buf: { type: 'object' },
+			//			},
+			//		},
+			//		{
+			//			type: 'array',
+			//			maxItems: 3,
+			//			items: {
+			//				type: 'object',
+			//				required: ['filename', 'mimetype'],
+			//				properties: {
+			//					filename: { type: 'string' },
+			//					mimetype: { type: 'string' },
+			//					_buf: { type: 'object' },
+			//				},
+			//			},
+			//		},
+			//	],
+			//},
 		},
 	},
 };
