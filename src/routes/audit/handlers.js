@@ -54,7 +54,7 @@ function buildSystemPrompt(imageType) {
 			'READ ALL VALUES ONLY FROM THE ACTUAL DOCUMENT IN THE IMAGE. Never use memory or assumptions.\n\n' +
 			'Specifically check:\n' +
 			'- Proper Shipping Name: exact DOT-authorized name.\n' +
-			'- Hazard Class / Division: numeric class (e.g., "2.2", "3", "8", "9").\n' +
+			'- Hazard Class / Division: the numeric DOT hazard class (e.g., "2.2", "3", "8"). In a standard DOT sequence, it appears AFTER the Proper Shipping Name. It may be followed by a subsidiary class in parentheses (e.g., "3 (6.1)") or a Packing Group (e.g., "PG III"). Note: Class 2 gases do not have a Packing Group. ABSOLUTELY IGNORE any right-hand table columns labeled "CLASS" (these contain NMFC freight classes like 55, 60, or 70).\n' +
 			'- UN/NA Identification Number: 4-digit number after "UN" or "NA".\n' +
 			'- Packing Group: Roman numerals I, II, or III where required.\n' +
 			'- HM Column Marking: "X" or "RQ" marking in hazardous material column.\n' +
@@ -508,8 +508,8 @@ function runAudit(bol, marker, cargo, exterier) {
 		issues.push({
 			source: 'CROSS',
 			severity: 'CRITICAL',
-			cfr: '49 CFR 172.504',
-			check: 'BOL-Placard Class Match (172.504)',
+			cfr: '49 CFR 172.504(a)',
+			check: 'BOL-Placard Class Match',
 			message: `BOL shows Class ${bolClass} but placard shows Class ${markerClass}. Hazard class mismatch.`,
 			fix: `Replace placard with the correct Class ${bolClass} placard on all 4 sides of the trailer.`,
 		});
@@ -534,7 +534,7 @@ function runAudit(bol, marker, cargo, exterier) {
 		issues.push({
 			source: 'CROSS',
 			severity: 'CRITICAL',
-			cfr: '49 CFR 172.301',
+			cfr: '49 CFR 172.400',
 			check: 'BOL-Package Class Match',
 			message: `Hazard class on BOL (${bolClass}) does not match hazard class label on cargo packages (${cargoClass}).`,
 			fix: 'Ensure package labels match the hazard class declared on the BOL.',
@@ -595,7 +595,7 @@ function runAudit(bol, marker, cargo, exterier) {
 		issues.push({
 			source: 'PLACARD',
 			severity: 'CRITICAL',
-			cfr: '49 CFR 172.504',
+			cfr: '49 CFR 172.504(a)',
 			check: 'Placard Present',
 			message: 'No hazmat placards detected on vehicle exterior.',
 			fix: 'Affix the required hazmat placards on all 4 sides of the trailer before departure.',
@@ -614,7 +614,7 @@ function runAudit(bol, marker, cargo, exterier) {
 		issues.push({
 			source: 'PLACARD',
 			severity: 'CRITICAL',
-			cfr: '49 CFR 172.516(a)',
+			cfr: '49 CFR 172.516(c)(1)',
 			check: 'Placard Condition',
 			message: 'Placard is damaged and may be unreadable at inspection.',
 			fix: 'Replace damaged placards with new, legible ones before departure.',
@@ -624,7 +624,7 @@ function runAudit(bol, marker, cargo, exterier) {
 		issues.push({
 			source: 'PLACARD',
 			severity: 'MINOR',
-			cfr: '49 CFR 172.516(a)',
+			cfr: '49 CFR 172.516(c)(1)',
 			check: 'Placard Condition',
 			message: 'Placard is blurry or partially obscured — may be flagged at inspection.',
 			fix: 'Clean or replace the placard to ensure it is fully legible.',
@@ -636,7 +636,7 @@ function runAudit(bol, marker, cargo, exterier) {
 		issues.push({
 			source: 'PLACARD',
 			severity: 'WARNING',
-			cfr: '49 CFR 172.516(b)',
+			cfr: '49 CFR 172.504(a)',
 			check: 'Four-Sided Placement',
 			message: 'Four-sided placard placement could not be verified from available photos.',
 			fix: 'Submit photos of all 4 sides of the trailer to confirm placard placement.',
@@ -648,7 +648,7 @@ function runAudit(bol, marker, cargo, exterier) {
 		issues.push({
 			source: 'PLACARD',
 			severity: 'MINOR',
-			cfr: '49 CFR 172.516(c)',
+			cfr: '49 CFR 172.516(c)(2)',
 			check: 'Placard Orientation',
 			message: 'Placard orientation does not appear to be point-up (diamond orientation required).',
 			fix: 'Re-affix the placard in the correct point-up diamond orientation.',
@@ -664,7 +664,7 @@ function runAudit(bol, marker, cargo, exterier) {
 		issues.push({
 			source: 'CARGO',
 			severity: 'CRITICAL',
-			cfr: '49 CFR 173.24',
+			cfr: '49 CFR 173.24(b)',
 			check: 'Leaks / Damage',
 			message: 'Visible damage or hazmat leakage observed on vehicle exterior.',
 			fix: 'Do not depart. Identify and contain the leak, inspect all packages, and repair damage before transport.',
@@ -689,7 +689,7 @@ function runAudit(bol, marker, cargo, exterier) {
 		issues.push({
 			source: 'CARGO',
 			severity: 'WARNING',
-			cfr: '49 CFR 177.834',
+			cfr: '49 CFR 177.834(a)',
 			check: 'Shifting Hazards',
 			message: 'Potential cargo shifting hazard detected — load securement could be improved.',
 			fix: 'Add additional tie-downs or bracing to prevent cargo movement in transit.',
