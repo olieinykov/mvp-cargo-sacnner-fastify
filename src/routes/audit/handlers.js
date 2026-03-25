@@ -49,39 +49,33 @@ function buildSystemPrompt(imageType) {
 
 	if (imageType === 'bolPhoto') {
 		return (
-			'You are a computer vision assistant for a Hazmat Load Audit System. ' +
-			'You may receive ONE OR MORE images of BOL / shipping paper documents. ' +
-			'Analyze EACH image independently and return a separate result for each one. ' +
-			'READ ALL VALUES ONLY FROM THE ACTUAL DOCUMENT IN EACH IMAGE. Never use memory or assumptions.\n\n' +
-			'Specifically check for each document:\n' +
-			'- Proper Shipping Name: exact DOT-authorized name.\n' +
-			'- Hazard Class / Division: the numeric DOT hazard class (e.g., "2.2", "3", "8"). In a standard DOT sequence, it appears AFTER the Proper Shipping Name. It may be followed by a subsidiary class in parentheses (e.g., "3 (6.1)") or a Packing Group (e.g., "PG III"). Note: Class 2 gases do not have a Packing Group. ABSOLUTELY IGNORE any right-hand table columns labeled "CLASS" (these contain NMFC freight classes like 55, 60, or 70).\n' +
-			'- UN/NA Identification Number: 4-digit number after "UN" or "NA".\n' +
-			'- Packing Group: Roman numerals I, II, or III where required.\n' +
-			'- HM Column Marking: "X" or "RQ" marking in hazardous material column.\n' +
-			'- Entry Sequence: shipping name, hazard class, UN number, packing group order.\n' +
-			'- 24-Hour Emergency Phone: monitored phone number.\n' +
-			'- Shipper Certification: signed statement at bottom of document.\n' +
-			'- Technical Name for N.O.S.: chemical name in parentheses.\n\n' +
-			'EXTRACTION RULES:\n' +
-			'- Scan ALL text in each document including small print, handwriting, and multi-line entries.\n' +
-			'- UN number, hazard class, and packing group may appear inline within commodity description text.\n' +
-			'- Example inline format: "COMPRESSED GAS, N.O.S. (contains X), 2.2, UN1956" — class=2.2, UN=1956.\n' +
-			'- Report ONLY values you can actually read from each specific document image.\n' +
-			'- If multiple hazmat entries exist, report the primary one; list additional UN numbers comma-separated.\n\n' +
-			'FIELD DEFINITIONS:\n' +
-			'- isValid: true if ALL required hazmat fields are present and BOL appears DOT-compliant. false if critical fields missing.\n' +
-			'- properShippingNameValid: true for any recognized DOT name from 49 CFR 172.101 including "COMPRESSED GAS, N.O.S.", "ESTERS, N.O.S.", "FLAMMABLE LIQUID, N.O.S.", "CORROSIVE LIQUID, N.O.S.", "PAINT", "ENVIRONMENTALLY HAZARDOUS SUBSTANCE, SOLID, N.O.S." and similar. false ONLY if clearly fabricated or misspelled. null if uncertain.\n' +
-			'- entrySequenceCompliant: true if entry follows DOT order (name → class → UN → PG). false if order differs. null if uncertain.\n' +
-			'- hmColumnMarked: true if X, RQ, or any hazmat marking is visible next to the hazmat line item anywhere on the document.\n\n' +
+			'You are a strict computer vision assistant for a Hazmat Load Audit System. ' +
+			'You will receive exactly ONE image of a BOL / shipping paper document. ' +
+			'Follow these steps EXACTLY:\n\n' +
+			'STEP 1: STRICT TEXT PARSING (ANTI-HALLUCINATION)\n' +
+			'- Act as a literal text scanner. DO NOT use your internal hazmat database. DO NOT autocomplete or guess.\n' +
+			'- Find the letters "UN" or "NA" in the description. Extract EXACTLY the 4 digits physically printed immediately after them.\n' +
+			'- NEVER alter the printed UN number to match the Proper Shipping Name.\n' +
+			'- Hazard Class: Extract ONLY the number (e.g., "8", "3") printed in the hazmat description. COMPLETELY IGNORE the right-hand table column labeled "Class or Rate".\n\n' +
+			'STEP 2: EXTRACT REMAINING FIELDS\n' +
+			'- Packing Group: Roman numerals (I, II, III) where required.\n' +
+			'- HM Column Marking: Look for an "X" or "RQ" under the "HM" column header.\n' +
+			'- Emergency Phone: 24-Hour monitored phone number (e.g., CHEMTREC).\n' +
+			'- Shipper Certification: Check if the signature block at the bottom is signed.\n\n' +
+			'FIELD DEFINITIONS (CRITICAL - BOOLEANS ONLY):\n' +
+			'- properShippingNameValid: MUST BE A BOOLEAN. true if the printed name appears to be a valid DOT name (e.g., "TOLUENE", "CORROSIVE SOLID..."). false if clearly fabricated. null if uncertain. DO NOT output the text of the chemical name itself.\n' +
+			'- entrySequenceCompliant: MUST BE A BOOLEAN. true if order is exactly [Name] then [Class] then [UN] then [PG]. false otherwise.\n\n' +
+			'MULTIPLE HAZMAT ENTRIES:\n' +
+			'- If this document shows TWO OR MORE distinct hazmat line items, return a SEPARATE object for each.\n' +
+			'- PAIRING RULE: pair each UN number with its corresponding hazard class and packing group from that specific line item.\n\n' +
 			HAZMAT_CLASS_REFERENCE +
-			'CRITICAL INSTRUCTION: You must return a JSON array with EXACTLY one element per image provided. ' +
-			'If 1 image is sent → array length 1. If 3 images are sent → array length 3. ' +
-			'Each element corresponds to the image at that index position.\n\n' +
-			'Respond ONLY with this JSON shape (array of results):\n' +
-			'[\n' +
-			'  {\n' +
-			'    "slotName": "bol",\n' +
+			'CRITICAL OUTPUT RULE:\n' +
+			'- ONE hazmat entry → single JSON object.\n' +
+			'- TWO OR MORE hazmat entries → JSON ARRAY of objects, one per entry.\n' +
+			'- Never use comma-separated UN numbers or hazard classes inside a single object.\n\n' +
+			'Respond ONLY with this JSON shape:\n' +
+			'{\n' +
+			'  "slotName": "bol",\n' +
 			'    "extracted": {\n' +
 			'      "isValid":                    { "mainValue": false,  "meaning": "" },\n' +
 			'      "properShippingNameValid":    { "mainValue": null,   "meaning": "" },\n' +
@@ -95,31 +89,33 @@ function buildSystemPrompt(imageType) {
 			'      "otherNotes": []\n' +
 			'    },\n' +
 			'    "confidence": { "overall": 0.0, "fields": {} },\n' +
-			'    "notes": []\n' +
-			'  }\n' +
-			']'
+			'  "notes": []\n' +
+			'}'
 		);
 	}
 
 	if (imageType === 'markerPhoto') {
 		return (
-			'You are a computer vision assistant for a Hazmat Load Audit System. ' +
-			'You may receive ONE OR MORE images of truck / trailer placards. ' +
-			'Analyze EACH image independently and return a separate result for each one. ' +
-			'READ ALL VALUES ONLY FROM WHAT IS PHYSICALLY VISIBLE IN EACH IMAGE. Never use memory.\n\n' +
-			'Specifically check for each image:\n' +
-			'- UN Number: 4-digit number displayed on the placard.\n' +
-			'- Hazard Class: identify from placard color, symbol, and class number using the reference below.\n' +
-			'- Placard Condition: readable, not faded/obscured, correct diamond orientation (point-up).\n' +
-			'- Four-Sided Placement: placards visible on all sides (as far as the photo allows).\n\n' +
+			'You are a strict computer vision assistant for a Hazmat Load Audit System. ' +
+			'You will receive exactly ONE image of a truck / trailer. ' +
+			'Follow these steps EXACTLY:\n\n' +
+			'STEP 1: IDENTIFY VALID PLACARDS\n' +
+			'- Look ONLY for SOLID-COLORED diamonds (yellow, red, blue, black/white, etc.).\n' +
+			'- COMPLETELY IGNORE bare metal frames, unpainted brackets, or hinges. They contain ZERO information. Do not attempt to read text or numbers from empty metal frames.\n\n' +
+			'STEP 2: EXTRACT DATA FROM COLORED PLACARDS ONLY\n' +
+			'- UN Number: The 4 large digits in the center (e.g., "2880").\n' +
+			'- Hazard Class: The single small number at the very bottom tip. \n' +
+			'  * HARD RULE: If the background is YELLOW, the class is 5.1 or 5.2. It is NEVER 8.\n' +
+			'  * HARD RULE: Do NOT use the digits from the UN number as the hazard class.\n\n' +
+			'STEP 3: FORMAT OUTPUT\n' +
+			'- Count how many ACTUAL COLORED placards you found.\n' +
+			'- If ZERO colored placards, return an empty array [].\n' +
+			'- If ONE colored placard, return a single JSON object.\n' +
+			'- If MULTIPLE colored placards (with DIFFERENT numbers), return a JSON array.\n\n' +
 			HAZMAT_CLASS_REFERENCE +
-			'CRITICAL INSTRUCTION: You must return a JSON array with EXACTLY one element per image provided. ' +
-			'If 1 image is sent → array length 1. If 3 images are sent → array length 3. ' +
-			'Each element corresponds to the image at that index position.\n\n' +
-			'Respond ONLY with this JSON shape (array of results):\n' +
-			'[\n' +
-			'  {\n' +
-			'    "slotName": "placard",\n' +
+			'Each object must follow this exact shape:\n' +
+			'{\n' +
+			'  "slotName": "placard",\n' +
 			'    "extracted": {\n' +
 			'      "isValid":                    { "mainValue": false,     "meaning": "" },\n' +
 			'      "unNumber":                   { "mainValue": null,      "meaning": "" },\n' +
@@ -130,19 +126,17 @@ function buildSystemPrompt(imageType) {
 			'      "otherNotes": []\n' +
 			'    },\n' +
 			'    "confidence": { "overall": 0.0, "fields": {} },\n' +
-			'    "notes": []\n' +
-			'  }\n' +
-			']'
+			'  "notes": []\n' +
+			'}'
 		);
 	}
 
 	// cargoPhoto
 	return (
 		'You are a computer vision assistant for a Hazmat Load Audit System. ' +
-		'You may receive ONE OR MORE images of cargo inside a vehicle. ' +
-		'Analyze EACH image independently and return a separate result for each one. ' +
-		'READ ALL VALUES ONLY FROM WHAT IS PHYSICALLY VISIBLE IN EACH IMAGE. Never use memory.\n\n' +
-		'Specifically check for each image:\n' +
+		'You will receive exactly ONE image of cargo inside a vehicle. ' +
+		'READ ALL VALUES ONLY FROM WHAT IS PHYSICALLY VISIBLE IN THIS IMAGE. Never use memory.\n\n' +
+		'Specifically check for this image:\n' +
 		'- UN Number: 4-digit number on package/drum labels if visible.\n' +
 		'- Hazard Class: from DOT diamond labels only (not GHS pictograms).\n' +
 		'- Package Labels: DOT hazard class diamond labels present on packages.\n' +
@@ -155,13 +149,17 @@ function buildSystemPrompt(imageType) {
 		'- Set loadSecured = false ONLY if cargo clearly loose with zero restraint visible.\n' +
 		'- Dark image + stable cargo → loadSecured = true with lower confidence.\n\n' +
 		HAZMAT_CLASS_REFERENCE +
-		'CRITICAL INSTRUCTION: You must return a JSON array with EXACTLY one element per image provided. ' +
-		'If 1 image is sent → array length 1. If 3 images are sent → array length 3. ' +
-		'Each element corresponds to the image at that index position.\n\n' +
-		'Respond ONLY with this JSON shape (array of results):\n' +
-		'[\n' +
-		'  {\n' +
-		'    "slotName": "intrier",\n' +
+		'MULTIPLE CARGO ENTRIES:\n' +
+		'- If this image shows packages with TWO OR MORE distinct hazmat labels (different UN numbers or different hazard classes on separate packages/drums), you MUST return a SEPARATE object for each distinct entry.\n' +
+		'- PAIRING RULE: Pair each UN number with the hazard class label visible on the same package. Do NOT combine values from different packages into one object.\n' +
+		'- Fields like loadSecured, securementType, palletUsed, noShiftingHazards apply to the overall load — copy the same values to all returned objects.\n\n' +
+		'CRITICAL OUTPUT RULE:\n' +
+		'- If there is exactly ONE hazmat entry visible → respond with a single JSON object.\n' +
+		'- If there are TWO OR MORE distinct hazmat entries → respond with a JSON ARRAY of objects, one per entry.\n' +
+		'- Never use comma-separated UN numbers or hazard classes inside a single object.\n\n' +
+		'Each object in the array (or the single object) must follow this exact shape:\n' +
+		'{\n' +
+		'  "slotName": "intrier",\n' +
 		'    "extracted": {\n' +
 		'      "isValid":               { "mainValue": false, "meaning": "" },\n' +
 		'      "unNumber":              { "mainValue": null,  "meaning": "" },\n' +
@@ -174,9 +172,8 @@ function buildSystemPrompt(imageType) {
 		'      "otherNotes": []\n' +
 		'    },\n' +
 		'    "confidence": { "overall": 0.0, "fields": {} },\n' +
-		'    "notes": []\n' +
-		'  }\n' +
-		']'
+		'  "notes": []\n' +
+		'}'
 	);
 }
 
@@ -219,17 +216,8 @@ function buildExterierSystemPrompt() {
 // Claude API calls
 // ==========================
 
-// files — array of { buffer, mimetype }
-async function callClaude(systemPrompt, files, userText) {
-	const imageBlocks = files.map(({ buffer, mimetype }) => ({
-		type: 'image',
-		source: {
-			type: 'base64',
-			media_type: mimetype,
-			data: encodeImageToBase64(buffer),
-		},
-	}));
-
+// file — single { buffer, mimetype }
+async function callClaude(systemPrompt, file, userText) {
 	let response;
 	try {
 		response = await getClient().messages.create({
@@ -240,7 +228,14 @@ async function callClaude(systemPrompt, files, userText) {
 				{
 					role: 'user',
 					content: [
-						...imageBlocks,
+						{
+							type: 'image',
+							source: {
+								type: 'base64',
+								media_type: file.mimetype,
+								data: encodeImageToBase64(file.buffer),
+							},
+						},
 						{ type: 'text', text: userText },
 					],
 				},
@@ -257,17 +252,31 @@ async function callClaude(systemPrompt, files, userText) {
 
 	let parsed;
 	try {
-		const clean = textBlock.text.replace(/```json|```/g, '').trim();
+		// Strip markdown code fences if present
+		let clean = textBlock.text.replace(/```json\s*|```\s*/g, '').trim();
+
+		// Claude sometimes wraps the JSON in explanatory text — extract the first {...} or [...]
+		if (!clean.startsWith('{') && !clean.startsWith('[')) {
+			const objMatch = clean.match(/(\{[\s\S]*\}|\[[\s\S]*\])/);
+			if (objMatch) clean = objMatch[1];
+		}
+
 		parsed = JSON.parse(clean);
-	} catch {
-		throw Object.assign(new Error('Failed to parse JSON from Claude response.'), { statusCode: 502 });
+	} catch (parseErr) {
+		console.error('[callClaude] JSON parse error:', parseErr.message);
+		console.error('[callClaude] Raw Claude response:\n', textBlock.text);
+		throw Object.assign(
+			new Error(`Failed to parse JSON from Claude response: ${parseErr.message}`),
+			{ statusCode: 502 },
+		);
 	}
 
-	// Normalise to array: Claude always returns an array now, but guard for legacy single-object responses
+	// Normalise: Claude may return a single object OR an array (multi-entry documents).
+	// Always return an array so analyzeImageWithClaude can flatten consistently.
 	const results = Array.isArray(parsed) ? parsed : [parsed];
 
-	for (const item of results) {
-		if (typeof item !== 'object' || item === null || typeof item.extracted !== 'object') {
+	for (const result of results) {
+		if (typeof result !== 'object' || result === null || typeof result.extracted !== 'object') {
 			throw Object.assign(new Error('Claude response does not match expected schema.'), { statusCode: 502 });
 		}
 	}
@@ -275,7 +284,34 @@ async function callClaude(systemPrompt, files, userText) {
 	return results;
 }
 
-// files — array of { _buf, mimetype }
+// Keys used for deduplication per slot type (compared by mainValue, otherNotes excluded)
+const DEDUP_KEYS = {
+	bol:     ['isValid', 'unNumber', 'hazardClass', 'packingGroup', 'emergencyPhone',
+	          'hmColumnMarked', 'shipperCertificationPresent', 'entrySequenceCompliant', 'properShippingNameValid'],
+	placard: ['isValid', 'unNumber', 'hazardClass', 'placardCondition', 'correctOrientation', 'fourSidedPlacementVerified'],
+	intrier: ['isValid', 'unNumber', 'hazardClass', 'packageLabelsPresent', 'loadSecured', 'securementType', 'palletUsed', 'noShiftingHazards'],
+};
+
+function extractionFingerprint(result) {
+	const keys = DEDUP_KEYS[result.slotName] ?? Object.keys(result.extracted ?? {}).filter((k) => k !== 'otherNotes');
+	const ext = result.extracted ?? {};
+	return keys.map((k) => {
+		const val = ext[k]?.mainValue ?? null;
+		return `${k}:${val === null ? '__null__' : String(val).trim().toLowerCase()}`;
+	}).join('|');
+}
+
+function deduplicateResults(results) {
+	const seen = new Set();
+	return results.filter((r) => {
+		const fp = extractionFingerprint(r);
+		if (seen.has(fp)) return false;
+		seen.add(fp);
+		return true;
+	});
+}
+
+// files — array of { _buf, mimetype }; each file is sent as a separate request and results are collected
 async function analyzeImageWithClaude(files, imageType) {
 	const userText = imageType === 'bolPhoto'
 		? 'Carefully examine every part of this BOL document. ' +
@@ -285,13 +321,19 @@ async function analyzeImageWithClaude(files, imageType) {
 		  'HM column marking (X or RQ next to hazmat line). ' +
 		  'These may be in narrow columns, inline in description text, handwritten, or small print. ' +
 		  'Report ONLY what you actually read from this document. Respond ONLY with JSON.'
-		: 'Analyze all provided images together and respond ONLY with JSON.';
+		: 'Analyze this image and respond ONLY with JSON.';
 
-	return callClaude(
-		buildSystemPrompt(imageType),
-		files.map((f) => ({ buffer: f._buf, mimetype: f.mimetype })),
-		userText,
+	const systemPrompt = buildSystemPrompt(imageType);
+
+	// Send each image as an independent request so Claude analyses every file separately.
+	// callClaude returns an array per file (1 item for single-entry, N for multi-entry).
+	// Flatten so bolResults / markerResults / cargoResults are always flat arrays.
+	const nestedResults = await Promise.all(
+		files.map((f) => callClaude(systemPrompt, { buffer: f._buf, mimetype: f.mimetype }, userText)),
 	);
+	const results = nestedResults.flat();
+
+	return deduplicateResults(results);
 }
 
 // TODO: exterior slot temporarily disabled
@@ -379,11 +421,31 @@ function runAudit(bolResults, markerResults, cargoResults/*, exterierResults*/) 
 	// Convenience: get mainValue safely
 	const v = (field) => field?.mainValue ?? null;
 
-	// Normalise class strings for comparison (trim, lowercase, strip "class " prefix)
+	// Normalise a single class string (trim, lowercase, strip "class " prefix)
 	const norm = (s) => (s ? String(s).trim().toLowerCase().replace(/^class\s+/, '') : null);
 
-	// Normalise UN/NA numbers: strip "UN"/"NA" prefix, keep only digits
+	// Normalise a single UN/NA number: strip "UN"/"NA" prefix, keep only digits
 	const normUN = (s) => (s ? String(s).trim().replace(/^(un|na)/i, '').trim() : null);
+
+	// Parse a class field that may contain multiple values like "Class 8, Class 3" or "3 / 8".
+	// Returns an array of normalised non-empty class strings.
+	const parseClasses = (raw) => {
+		if (!raw) return [];
+		return String(raw)
+			.split(/[\s,;/|&+()+]+/)
+			.map((token) => norm(token.trim()))
+			.filter((token) => token && /^\d/.test(token));
+	};
+
+	// Parse a UN field that may contain multiple values like "UN1170, UN1993" or "1170/1993".
+	// Returns an array of normalised digit-only strings.
+	const parseUNs = (raw) => {
+		if (!raw) return [];
+		return String(raw)
+			.split(/[\s,;/|&+()+]+/)
+			.map((token) => normUN(token.trim()))
+			.filter((token) => token && /^\d{4}$/.test(token));
+	};
 
 	// Helper to add an issue only if not already present (same cfr + check + message)
 	const addIssue = (issue) => {
@@ -394,202 +456,255 @@ function runAudit(bolResults, markerResults, cargoResults/*, exterierResults*/) 
 	};
 
 	// ─────────────────────────────────────────────
-	// 1. BOL FIELD VALIDATION — for each BOL (49 CFR 172.200–204)
+	// 1. BOL FIELD VALIDATION — "at least one BOL satisfies" logic (49 CFR 172.200–204)
+	// An issue is raised only if NO BOL image satisfies the condition.
 	// ─────────────────────────────────────────────
 
-	for (const bol of bolResults) {
-		const bolExt = bol.extracted ?? {};
-		const bolUN    = v(bolExt.unNumber);
-		const bolClass = v(bolExt.hazardClass);
+	const noBolHasUN = bolResults.every((bol) => parseUNs(v(bol.extracted?.unNumber)).length === 0);
+	if (noBolHasUN) {
+		addIssue({
+			source: 'BOL',
+			severity: 'CRITICAL',
+			cfr: '49 CFR 172.202(a)(1)',
+			check: 'UN Number',
+			message: 'UN/NA identification number is missing from all BOL documents.',
+			fix: 'Add the UN/NA number (e.g. UN1170) to the hazmat entry on the BOL.',
+		});
+	}
 
-		if (!bolUN) {
+	const noBolHasClass = bolResults.every((bol) => parseClasses(v(bol.extracted?.hazardClass)).length === 0);
+	if (noBolHasClass) {
+		addIssue({
+			source: 'BOL',
+			severity: 'CRITICAL',
+			cfr: '49 CFR 172.202(a)(2)',
+			check: 'Hazard Class',
+			message: 'Hazard class / division is missing from all BOL documents.',
+			fix: 'Add the numeric hazard class (e.g. "3", "8", "5.2") to the BOL entry.',
+		});
+	}
+
+	const noBolHasHM = bolResults.every((bol) => !v(bol.extracted?.hmColumnMarked));
+	if (noBolHasHM) {
+		addIssue({
+			source: 'BOL',
+			severity: 'CRITICAL',
+			cfr: '49 CFR 172.201(a)(1)',
+			check: 'HM Column (172.201)',
+			message: 'HM column is not clearly marked with "X" or "RQ" on any BOL document.',
+			fix: 'Mark "X" in the HM column next to each hazmat entry on the BOL.',
+		});
+	}
+
+	const noBolHasPhone = bolResults.every((bol) => !v(bol.extracted?.emergencyPhone));
+	if (noBolHasPhone) {
+		addIssue({
+			source: 'BOL',
+			severity: 'CRITICAL',
+			cfr: '49 CFR 172.201(d)',
+			check: 'Emergency Phone',
+			message: '24-hour emergency response phone number is missing from all BOL documents.',
+			fix: 'Add a monitored 24-hour emergency phone number (e.g. CHEMTREC 800-424-9300).',
+		});
+	}
+
+	const noBolHasPG = bolResults.every((bol) => {
+		const bolExt      = bol.extracted ?? {};
+		const bolClsArr   = parseClasses(v(bolExt.hazardClass));
+		// BOL is PG-exempt if ANY of its classes is Class 2.x or Class 7
+		const isPG_exempt = bolClsArr.some((c) => c.startsWith('2') || c === '7');
+		if (isPG_exempt) return false; // exempt BOL — does not count as "missing"
+		const pgValue = v(bolExt.packingGroup);
+		return !pgValue || String(pgValue).trim() === '—' || String(pgValue).trim() === '-';
+	});
+	if (noBolHasPG) {
+		addIssue({
+			source: 'BOL',
+			severity: 'MAJOR',
+			cfr: '49 CFR 172.202(a)(4)',
+			check: 'Packing Group',
+			message: 'Packing group (I, II, or III) is missing from all applicable BOL documents.',
+			fix: 'Add the required packing group designation to the BOL hazmat entry.',
+		});
+	}
+
+	const noBolHasCert = bolResults.every((bol) => !v(bol.extracted?.shipperCertificationPresent));
+	if (noBolHasCert) {
+		addIssue({
+			source: 'BOL',
+			severity: 'MAJOR',
+			cfr: '49 CFR 172.204',
+			check: 'Shipper Cert (172.204)',
+			message: 'Shipper certification signature is absent or illegible on all BOL documents.',
+			fix: 'Have the shipper sign the certification statement on the BOL.',
+		});
+	}
+
+	const noBolSequenceOk = bolResults.every((bol) => v(bol.extracted?.entrySequenceCompliant) === false);
+	if (noBolSequenceOk) {
+		addIssue({
+			source: 'BOL',
+			severity: 'MAJOR',
+			cfr: '49 CFR 172.201(a)',
+			check: 'Entry Sequence',
+			message: 'Hazmat entry sequence does not follow required DOT order on any BOL document (shipping name → class → UN number → packing group).',
+			fix: 'Reorder the BOL hazmat entry to: Proper Shipping Name, Hazard Class, UN/NA Number, Packing Group.',
+		});
+	}
+
+	// ─────────────────────────────────────────────
+	// 2. PROPER SHIPPING NAME VERIFICATION (49 CFR 172.101 / 172.202)
+	// ─────────────────────────────────────────────
+
+	const noBolShippingNameOk = bolResults.every((bol) => v(bol.extracted?.properShippingNameValid) === false);
+	if (noBolShippingNameOk) {
+		addIssue({
+			source: 'BOL',
+			severity: 'MINOR',
+			cfr: '49 CFR 172.202(a)(1)',
+			check: 'Proper Shipping Name (172.101)',
+			message: 'Proper shipping name appears incorrect, abbreviated, or does not match the DOT Hazardous Materials Table (49 CFR 172.101) on all BOL documents.',
+			fix: 'Verify the exact DOT-authorized Proper Shipping Name from 49 CFR 172.101. Unauthorized abbreviations are not permitted.',
+		});
+	}
+
+	// ─────────────────────────────────────────────
+	// 3. BOL × PLACARD CROSS-MATCH — set-based (49 CFR 172.504)
+	// Each UN/Class from BOL must find at least one match across ALL placards,
+	// and each UN/Class from placards must find at least one match across ALL BOLs.
+	// ─────────────────────────────────────────────
+
+	const bolClasses     = [...new Set(bolResults    .flatMap((b) => parseClasses(v(b.extracted?.hazardClass))))];
+	const bolUNs         = [...new Set(bolResults    .flatMap((b) => parseUNs(v(b.extracted?.unNumber))))];
+	const placardClasses = [...new Set(markerResults .flatMap((m) => parseClasses(v(m.extracted?.hazardClass))))];
+	const placardUNs     = [...new Set(markerResults .flatMap((m) => parseUNs(v(m.extracted?.unNumber))))];
+
+	// BOL classes that have no matching placard class
+	for (const bc of bolClasses) {
+		if (placardClasses.length > 0 && !placardClasses.includes(bc)) {
 			addIssue({
-				source: 'BOL',
+				source: 'CROSS',
 				severity: 'CRITICAL',
-				cfr: '49 CFR 172.202(a)(1)',
-				check: 'UN Number',
-				message: 'UN/NA identification number is missing from BOL.',
-				fix: 'Add the UN/NA number (e.g. UN1170) to the hazmat entry on the BOL.',
+				cfr: '49 CFR 172.504(a)',
+				check: 'BOL-Placard Class Match',
+				message: `BOL declares Class ${bc} but no placard with this class was found (placard classes: ${placardClasses.join(', ')}).`,
+				fix: `Ensure at least one placard displays Class ${bc} on all 4 sides of the trailer.`,
 			});
 		}
-
-		if (!bolClass) {
+	}
+	// Placard classes that have no matching BOL class
+	for (const pc of placardClasses) {
+		if (bolClasses.length > 0 && !bolClasses.includes(pc)) {
 			addIssue({
-				source: 'BOL',
+				source: 'CROSS',
 				severity: 'CRITICAL',
-				cfr: '49 CFR 172.202(a)(2)',
-				check: 'Hazard Class',
-				message: 'Hazard class / division is missing from BOL.',
-				fix: 'Add the numeric hazard class (e.g. "3", "8", "5.2") to the BOL entry.',
+				cfr: '49 CFR 172.504(a)',
+				check: 'BOL-Placard Class Match',
+				message: `Placard shows Class ${pc} but this class is not declared on any BOL (BOL classes: ${bolClasses.join(', ')}).`,
+				fix: `Remove or replace the incorrect Class ${pc} placard, or update the BOL to include this class.`,
 			});
 		}
+	}
 
-		if (!v(bolExt.hmColumnMarked)) {
+	// BOL UN numbers that have no matching placard UN
+	for (const bu of bolUNs) {
+		if (placardUNs.length > 0 && !placardUNs.includes(bu)) {
 			addIssue({
-				source: 'BOL',
+				source: 'CROSS',
 				severity: 'CRITICAL',
-				cfr: '49 CFR 172.201(a)(1)',
-				check: 'HM Column (172.201)',
-				message: 'HM column is not clearly marked with "X" or "RQ" on the BOL.',
-				fix: 'Mark "X" in the HM column next to each hazmat entry on the BOL.',
+				cfr: '49 CFR 172.332',
+				check: 'BOL-Placard UN Match',
+				message: `UN${bu} is listed on BOL but was not found on any placard (placard UNs: ${placardUNs.map((u) => 'UN' + u).join(', ')}).`,
+				fix: `Ensure a placard displaying UN${bu} is present on all 4 sides of the trailer.`,
 			});
 		}
-
-		if (!v(bolExt.emergencyPhone)) {
+	}
+	// Placard UN numbers that have no matching BOL UN
+	for (const pu of placardUNs) {
+		if (bolUNs.length > 0 && !bolUNs.includes(pu)) {
 			addIssue({
-				source: 'BOL',
+				source: 'CROSS',
 				severity: 'CRITICAL',
-				cfr: '49 CFR 172.201(d)',
-				check: 'Emergency Phone',
-				message: '24-hour emergency response phone number is missing from BOL.',
-				fix: 'Add a monitored 24-hour emergency phone number (e.g. CHEMTREC 800-424-9300).',
-			});
-		}
-
-		const bolClassNorm = norm(bolClass);
-		const isPG_exempt  = bolClassNorm && (bolClassNorm.startsWith('2') || bolClassNorm === '7');
-		const pgValue      = v(bolExt.packingGroup);
-		const packingGroupMissing =
-			!pgValue || String(pgValue).trim() === '—' || String(pgValue).trim() === '-';
-
-		if (packingGroupMissing && !isPG_exempt) {
-			addIssue({
-				source: 'BOL',
-				severity: 'MAJOR',
-				cfr: '49 CFR 172.202(a)(4)',
-				check: 'Packing Group',
-				message: 'Packing group (I, II, or III) is missing from BOL.',
-				fix: 'Add the required packing group designation to the BOL hazmat entry.',
-			});
-		}
-
-		if (!v(bolExt.shipperCertificationPresent)) {
-			addIssue({
-				source: 'BOL',
-				severity: 'MAJOR',
-				cfr: '49 CFR 172.204',
-				check: 'Shipper Cert (172.204)',
-				message: 'Shipper certification signature is absent or illegible on the BOL.',
-				fix: 'Have the shipper sign the certification statement on the BOL.',
-			});
-		}
-
-		if (v(bolExt.entrySequenceCompliant) === false) {
-			addIssue({
-				source: 'BOL',
-				severity: 'MAJOR',
-				cfr: '49 CFR 172.201(a)',
-				check: 'Entry Sequence',
-				message: 'Hazmat entry sequence on BOL does not follow required DOT order (shipping name → class → UN number → packing group).',
-				fix: 'Reorder the BOL hazmat entry to: Proper Shipping Name, Hazard Class, UN/NA Number, Packing Group.',
-			});
-		}
-
-		// ─────────────────────────────────────────────
-		// 2. PROPER SHIPPING NAME VERIFICATION (49 CFR 172.101 / 172.202)
-		// ─────────────────────────────────────────────
-
-		if (v(bolExt.properShippingNameValid) === false) {
-			addIssue({
-				source: 'BOL',
-				severity: 'MINOR',
-				cfr: '49 CFR 172.202(a)(1)',
-				check: 'Proper Shipping Name (172.101)',
-				message: 'Proper shipping name on BOL appears incorrect, abbreviated, or does not match the DOT Hazardous Materials Table (49 CFR 172.101).',
-				fix: 'Verify the exact DOT-authorized Proper Shipping Name from 49 CFR 172.101. Unauthorized abbreviations are not permitted.',
+				cfr: '49 CFR 172.332',
+				check: 'BOL-Placard UN Match',
+				message: `UN${pu} is shown on a placard but was not found on any BOL (BOL UNs: ${bolUNs.map((u) => 'UN' + u).join(', ')}).`,
+				fix: `Remove or replace the incorrect placard, or update the BOL to include UN${pu}.`,
 			});
 		}
 	}
 
 	// ─────────────────────────────────────────────
-	// 3. BOL × PLACARD CROSS-MATCH — all combinations (49 CFR 172.504)
+	// 4. BOL × CARGO CROSS-MATCH — set-based (49 CFR 172.301 / 172.400)
 	// ─────────────────────────────────────────────
 
-	for (const bol of bolResults) {
-		const bolExt   = bol.extracted ?? {};
-		const bolClass = v(bolExt.hazardClass);
-		const bolUN    = v(bolExt.unNumber);
+	const cargoClasses = [...new Set(cargoResults.flatMap((c) => parseClasses(v(c.extracted?.hazardClass))))];
+	const cargoUNs     = [...new Set(cargoResults.flatMap((c) => parseUNs(v(c.extracted?.unNumber))))];
 
-		for (const marker of markerResults) {
-			const markerExt   = marker.extracted ?? {};
-			const markerClass = v(markerExt.hazardClass);
-			const markerUN    = v(markerExt.unNumber);
-
-			if (bolClass && markerClass && norm(bolClass) !== norm(markerClass)) {
-				addIssue({
-					source: 'CROSS',
-					severity: 'CRITICAL',
-					cfr: '49 CFR 172.504(a)',
-					check: 'BOL-Placard Class Match',
-					message: `BOL shows Class ${bolClass} but placard shows Class ${markerClass}. Hazard class mismatch.`,
-					fix: `Replace placard with the correct Class ${bolClass} placard on all 4 sides of the trailer.`,
-				});
-			}
-
-			if (bolUN && markerUN && normUN(bolUN) !== normUN(markerUN)) {
-				addIssue({
-					source: 'CROSS',
-					severity: 'CRITICAL',
-					cfr: '49 CFR 172.332',
-					check: 'BOL-Placard UN Match',
-					message: `UN number on BOL (${bolUN}) does not match UN number on placard (${markerUN}).`,
-					fix: `Update the placard to display the correct UN number: ${bolUN}.`,
-				});
-			}
-		}
-	}
-
-	// ─────────────────────────────────────────────
-	// 4. BOL × CARGO CROSS-MATCH — all combinations (49 CFR 172.301 / 172.400)
-	// ─────────────────────────────────────────────
-
-	for (const bol of bolResults) {
-		const bolExt   = bol.extracted ?? {};
-		const bolClass = v(bolExt.hazardClass);
-		const bolUN    = v(bolExt.unNumber);
-
-		for (const cargo of cargoResults) {
-			const cargoExt   = cargo.extracted ?? {};
-			const cargoClass = v(cargoExt.hazardClass);
-			const cargoUN    = v(cargoExt.unNumber);
-
-			if (bolClass && cargoClass && norm(bolClass) !== norm(cargoClass)) {
-				addIssue({
-					source: 'CROSS',
-					severity: 'CRITICAL',
-					cfr: '49 CFR 172.400',
-					check: 'BOL-Package Class Match',
-					message: `Hazard class on BOL (${bolClass}) does not match hazard class label on cargo packages (${cargoClass}).`,
-					fix: 'Ensure package labels match the hazard class declared on the BOL.',
-				});
-			}
-
-			if (bolUN && cargoUN && normUN(bolUN) !== normUN(cargoUN)) {
-				addIssue({
-					source: 'CROSS',
-					severity: 'CRITICAL',
-					cfr: '49 CFR 172.301(a)',
-					check: 'BOL-Package UN Match',
-					message: `UN number on BOL (${bolUN}) does not match UN number on cargo packages (${cargoUN}).`,
-					fix: `Ensure cargo package markings show the correct UN number: ${bolUN}.`,
-				});
-			}
-		}
-	}
-
-	// Package labels check — for each cargo image
-	for (const cargo of cargoResults) {
-		const cargoExt = cargo.extracted ?? {};
-		if (!v(cargoExt.packageLabelsPresent)) {
+	// BOL classes that have no matching cargo class
+	for (const bc of bolClasses) {
+		if (cargoClasses.length > 0 && !cargoClasses.includes(bc)) {
 			addIssue({
-				source: 'CARGO',
+				source: 'CROSS',
 				severity: 'CRITICAL',
 				cfr: '49 CFR 172.400',
-				check: 'Package Labels',
-				message: 'Required hazard class labels are not visible on cargo packages.',
-				fix: 'Affix the correct hazard class label(s) to each package as required by 49 CFR 172.400.',
+				check: 'BOL-Package Class Match',
+				message: `BOL declares Class ${bc} but no cargo package label with this class was found (cargo classes: ${cargoClasses.join(', ')}).`,
+				fix: 'Ensure package labels match the hazard class declared on the BOL.',
 			});
 		}
+	}
+	// Cargo classes that have no matching BOL class
+	for (const cc of cargoClasses) {
+		if (bolClasses.length > 0 && !bolClasses.includes(cc)) {
+			addIssue({
+				source: 'CROSS',
+				severity: 'CRITICAL',
+				cfr: '49 CFR 172.400',
+				check: 'BOL-Package Class Match',
+				message: `Cargo package shows Class ${cc} but this class is not declared on any BOL (BOL classes: ${bolClasses.join(', ')}).`,
+				fix: 'Update the BOL to include all hazard classes present on cargo packages, or re-label the packages.',
+			});
+		}
+	}
+
+	// BOL UN numbers that have no matching cargo UN
+	for (const bu of bolUNs) {
+		if (cargoUNs.length > 0 && !cargoUNs.includes(bu)) {
+			addIssue({
+				source: 'CROSS',
+				severity: 'CRITICAL',
+				cfr: '49 CFR 172.301(a)',
+				check: 'BOL-Package UN Match',
+				message: `UN${bu} is listed on BOL but was not found on any cargo package (cargo UNs: ${cargoUNs.map((u) => 'UN' + u).join(', ')}).`,
+				fix: `Ensure cargo packages are marked with UN${bu} as required.`,
+			});
+		}
+	}
+	// Cargo UN numbers that have no matching BOL UN
+	for (const cu of cargoUNs) {
+		if (bolUNs.length > 0 && !bolUNs.includes(cu)) {
+			addIssue({
+				source: 'CROSS',
+				severity: 'CRITICAL',
+				cfr: '49 CFR 172.301(a)',
+				check: 'BOL-Package UN Match',
+				message: `UN${cu} is marked on cargo but was not found on any BOL (BOL UNs: ${bolUNs.map((u) => 'UN' + u).join(', ')}).`,
+				fix: `Update the BOL to include UN${cu}, or verify the correct UN marking on cargo packages.`,
+			});
+		}
+	}
+
+	// Package labels check — issue only if NO cargo image has labels present
+	const noCargoHasLabels = cargoResults.every((cargo) => !v(cargo.extracted?.packageLabelsPresent));
+	if (noCargoHasLabels) {
+		addIssue({
+			source: 'CARGO',
+			severity: 'CRITICAL',
+			cfr: '49 CFR 172.400',
+			check: 'Package Labels',
+			message: 'Required hazard class labels are not visible on cargo packages in any provided photo.',
+			fix: 'Affix the correct hazard class label(s) to each package as required by 49 CFR 172.400.',
+		});
 	}
 
 	// ─────────────────────────────────────────────
@@ -599,10 +714,10 @@ function runAudit(bolResults, markerResults, cargoResults/*, exterierResults*/) 
 
 	const allClasses = [
 		...new Set([
-			...bolResults.map((b) => norm(v(b.extracted?.hazardClass))),
-			...markerResults.map((m) => norm(v(m.extracted?.hazardClass))),
-			...cargoResults.map((c) => norm(v(c.extracted?.hazardClass))),
-		].filter(Boolean)),
+			...bolResults.flatMap((b) => parseClasses(v(b.extracted?.hazardClass))),
+			...markerResults.flatMap((m) => parseClasses(v(m.extracted?.hazardClass))),
+			...cargoResults.flatMap((c) => parseClasses(v(c.extracted?.hazardClass))),
+		]),
 	];
 
 	if (allClasses.length >= 2) {
@@ -623,85 +738,89 @@ function runAudit(bolResults, markerResults, cargoResults/*, exterierResults*/) 
 	}
 
 	// ─────────────────────────────────────────────
-	// 6. PLACARD CONDITION CHECKS — for each placard image
+	// 6. PLACARD CONDITION CHECKS — "at least one placard satisfies" logic
 	// ─────────────────────────────────────────────
 
-	for (const marker of markerResults) {
-		const markerExt        = marker.extracted ?? {};
-		const markerPlacardCond = v(markerExt.placardCondition);
-		const placardCond = (markerPlacardCond && markerPlacardCond !== 'unknown') ? markerPlacardCond : null;
-
-		if (placardCond === 'damaged') {
-			addIssue({
-				source: 'PLACARD',
-				severity: 'CRITICAL',
-				cfr: '49 CFR 172.516(c)(1)',
-				check: 'Placard Condition',
-				message: 'Placard is damaged and may be unreadable at inspection.',
-				fix: 'Replace damaged placards with new, legible ones before departure.',
-			});
-		} else if (placardCond === 'blurry') {
-			addIssue({
-				source: 'PLACARD',
-				severity: 'MINOR',
-				cfr: '49 CFR 172.516(c)(1)',
-				check: 'Placard Condition',
-				message: 'Placard is blurry or partially obscured — may be flagged at inspection.',
-				fix: 'Clean or replace the placard to ensure it is fully legible.',
-			});
-		}
-
-		if (!v(markerExt.fourSidedPlacementVerified)) {
-			addIssue({
-				source: 'PLACARD',
-				severity: 'WARNING',
-				cfr: '49 CFR 172.504(a)',
-				check: 'Four-Sided Placement',
-				message: 'Four-sided placard placement could not be verified from available photos.',
-				fix: 'Submit photos of all 4 sides of the trailer to confirm placard placement.',
-			});
-		}
-
-		if (v(markerExt.correctOrientation) === false) {
+	const allPlacardsDamaged = markerResults.every((marker) => {
+		const cond = v(marker.extracted?.placardCondition);
+		return cond && cond !== 'unknown' && cond === 'damaged';
+	});
+	if (allPlacardsDamaged && markerResults.length > 0) {
+		addIssue({
+			source: 'PLACARD',
+			severity: 'CRITICAL',
+			cfr: '49 CFR 172.516(c)(1)',
+			check: 'Placard Condition',
+			message: 'All placards are damaged and may be unreadable at inspection.',
+			fix: 'Replace damaged placards with new, legible ones before departure.',
+		});
+	} else {
+		const anyPlacardBlurry = markerResults.every((marker) => {
+			const cond = v(marker.extracted?.placardCondition);
+			return cond && cond !== 'unknown' && (cond === 'blurry' || cond === 'damaged');
+		});
+		if (anyPlacardBlurry && markerResults.length > 0) {
 			addIssue({
 				source: 'PLACARD',
 				severity: 'MINOR',
-				cfr: '49 CFR 172.516(c)(2)',
-				check: 'Placard Orientation',
-				message: 'Placard orientation does not appear to be point-up (diamond orientation required).',
-				fix: 'Re-affix the placard in the correct point-up diamond orientation.',
+				cfr: '49 CFR 172.516(c)(1)',
+				check: 'Placard Condition',
+				message: 'No clearly legible placard found — all placards are blurry, damaged or obscured.',
+				fix: 'Clean or replace all placards to ensure they are fully legible.',
 			});
 		}
 	}
 
+	const noPlacardFourSided = markerResults.every((marker) => !v(marker.extracted?.fourSidedPlacementVerified));
+	if (noPlacardFourSided && markerResults.length > 0) {
+		addIssue({
+			source: 'PLACARD',
+			severity: 'WARNING',
+			cfr: '49 CFR 172.504(a)',
+			check: 'Four-Sided Placement',
+			message: 'Four-sided placard placement could not be verified from any of the provided photos.',
+			fix: 'Submit photos of all 4 sides of the trailer to confirm placard placement.',
+		});
+	}
+
+	const noPlacardCorrectOrientation = markerResults.every((marker) => v(marker.extracted?.correctOrientation) === false);
+	if (noPlacardCorrectOrientation && markerResults.length > 0) {
+		addIssue({
+			source: 'PLACARD',
+			severity: 'MINOR',
+			cfr: '49 CFR 172.516(c)(2)',
+			check: 'Placard Orientation',
+			message: 'No placard appears to be in the correct point-up (diamond) orientation.',
+			fix: 'Re-affix the placard(s) in the correct point-up diamond orientation.',
+		});
+	}
+
 	// ─────────────────────────────────────────────
-	// 7. CARGO / LOAD SECUREMENT — for each cargo image
+	// 7. CARGO / LOAD SECUREMENT — "at least one cargo satisfies" logic
 	// ─────────────────────────────────────────────
 
-	for (const cargo of cargoResults) {
-		const cargoExt = cargo.extracted ?? {};
+	const noCargoSecured = cargoResults.every((cargo) => v(cargo.extracted?.loadSecured) === false);
+	if (noCargoSecured && cargoResults.length > 0) {
+		addIssue({
+			source: 'CARGO',
+			severity: 'WARNING',
+			cfr: '49 CFR 177.834(a)',
+			check: 'Load Securement',
+			message: 'Cargo does not appear to be properly secured against shifting in any of the provided photos.',
+			fix: 'Secure all cargo with appropriate tie-downs, straps, or blocking before departure.',
+		});
+	}
 
-		if (v(cargoExt.loadSecured) === false) {
-			addIssue({
-				source: 'CARGO',
-				severity: 'WARNING',
-				cfr: '49 CFR 177.834(a)',
-				check: 'Load Securement',
-				message: 'Cargo does not appear to be properly secured against shifting during transport.',
-				fix: 'Secure all cargo with appropriate tie-downs, straps, or blocking before departure.',
-			});
-		}
-
-		if (v(cargoExt.noShiftingHazards) === false) {
-			addIssue({
-				source: 'CARGO',
-				severity: 'WARNING',
-				cfr: '49 CFR 177.834(a)',
-				check: 'Shifting Hazards',
-				message: 'Potential cargo shifting hazard detected — load securement could be improved.',
-				fix: 'Add additional tie-downs or bracing to prevent cargo movement in transit.',
-			});
-		}
+	const noCargoNoShifting = cargoResults.every((cargo) => v(cargo.extracted?.noShiftingHazards) === false);
+	if (noCargoNoShifting && cargoResults.length > 0) {
+		addIssue({
+			source: 'CARGO',
+			severity: 'WARNING',
+			cfr: '49 CFR 177.834(a)',
+			check: 'Shifting Hazards',
+			message: 'Potential cargo shifting hazards detected in all provided cargo photos.',
+			fix: 'Add additional tie-downs or bracing to prevent cargo movement in transit.',
+		});
 	}
 
 	// ─────────────────────────────────────────────
@@ -739,10 +858,10 @@ function runAudit(bolResults, markerResults, cargoResults/*, exterierResults*/) 
 
 	const allClassesForRec = [
 		...new Set([
-			...bolResults.map((b) => v(b.extracted?.hazardClass)),
-			...markerResults.map((m) => v(m.extracted?.hazardClass)),
-			...cargoResults.map((c) => v(c.extracted?.hazardClass)),
-		].filter(Boolean)),
+			...bolResults.flatMap((b) => parseClasses(v(b.extracted?.hazardClass))),
+			...markerResults.flatMap((m) => parseClasses(v(m.extracted?.hazardClass))),
+			...cargoResults.flatMap((c) => parseClasses(v(c.extracted?.hazardClass))),
+		]),
 	];
 	const placardRecommendations = recommendPlacards(allClassesForRec);
 

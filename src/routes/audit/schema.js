@@ -66,7 +66,7 @@ export const createAuditSchema = {
 					},
 					{
 						type: 'array',
-						maxItems: 3,
+						maxItems: 5,
 						items: {
 							type: 'object',
 							required: ['filename', 'mimetype'],
@@ -92,7 +92,7 @@ export const createAuditSchema = {
 					},
 					{
 						type: 'array',
-						maxItems: 3,
+						maxItems: 5,
 						items: {
 							type: 'object',
 							required: ['filename', 'mimetype'],
@@ -118,7 +118,7 @@ export const createAuditSchema = {
 					},
 					{
 						type: 'array',
-						maxItems: 3,
+						maxItems: 5,
 						items: {
 							type: 'object',
 							required: ['filename', 'mimetype'],
