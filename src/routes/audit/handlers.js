@@ -59,12 +59,22 @@ function buildSystemPrompt(imageType) {
 			'- Hazard Class: Extract ONLY the number (e.g., "8", "3") printed in the hazmat description. COMPLETELY IGNORE the right-hand table column labeled "Class or Rate".\n\n' +
 			'STEP 2: EXTRACT REMAINING FIELDS\n' +
 			'- Packing Group: Roman numerals (I, II, III) where required.\n' +
-			'- HM Column Marking: Look for an "X" or "RQ" under the "HM" column header.\n' +
+			'- HM Column Marking: "X" or "RQ" marking in hazardous material column.\n' +
 			'- Emergency Phone: 24-Hour monitored phone number (e.g., CHEMTREC).\n' +
 			'- Shipper Certification: Check if the signature block at the bottom is signed.\n\n' +
 			'FIELD DEFINITIONS (CRITICAL - BOOLEANS ONLY):\n' +
-			'- properShippingNameValid: MUST BE A BOOLEAN. true if the printed name appears to be a valid DOT name (e.g., "TOLUENE", "CORROSIVE SOLID..."). false if clearly fabricated. null if uncertain. DO NOT output the text of the chemical name itself.\n' +
-			'- entrySequenceCompliant: MUST BE A BOOLEAN. true if order is exactly [Name] then [Class] then [UN] then [PG]. false otherwise.\n\n' +
+			'- properShippingNameValid: MUST BE A BOOLEAN. true if the printed name appears to be a valid DOT name (e.g., "TOLUENE", "COATING SOLUTION", "CORROSIVE LIQUID, N.O.S."). ' +
+			'false ONLY if it is clearly a trade/brand name or product description with no DOT equivalent. ' +
+			'When in doubt, set null — do NOT default to false.\n' +
+			'- entrySequenceCompliant: true if entry follows DOT order (name → class → UN → PG). false if order differs. null if uncertain.\n' +
+			'- hmColumnMarked: Search the ENTIRE document — not just the table column — for an "X" or "RQ" ' +
+			'associated with the hazmat line item. On many BOL formats the HM column is merged with other columns ' +
+			'or the marking may appear inline within the description text itself, near the UN number, ' +
+			'or as a standalone character adjacent to the cargo line. ' +
+			'Set true if ANY "X" or "RQ" is found anywhere on the hazmat line row or description block.\n' +
+			'Check if an "X" appears in that column ON THE DATA ROW (not the header). ' +
+			'The column is often very narrow and placed between package count and units columns. ' +
+			'true if X or RQ found on any hazmat data row in that column.\n' +
 			'MULTIPLE HAZMAT ENTRIES:\n' +
 			'- If this document shows TWO OR MORE distinct hazmat line items, return a SEPARATE object for each.\n' +
 			'- PAIRING RULE: pair each UN number with its corresponding hazard class and packing group from that specific line item.\n\n' +
@@ -72,6 +82,8 @@ function buildSystemPrompt(imageType) {
 			'CRITICAL OUTPUT RULE:\n' +
 			'- ONE hazmat entry → single JSON object.\n' +
 			'- TWO OR MORE hazmat entries → JSON ARRAY of objects, one per entry.\n' +
+			'- STRICT SCHEMA RULE: The "extracted" field MUST NEVER BE AN ARRAY. If you have multiple entries, return a ROOT array of objects, like this:\n' +
+			'  [ { "slotName": "bol", "extracted": {...} }, { "slotName": "bol", "extracted": {...} } ]\n' +
 			'- Never use comma-separated UN numbers or hazard classes inside a single object.\n\n' +
 			'Respond ONLY with this JSON shape:\n' +
 			'{\n' +
@@ -134,6 +146,11 @@ function buildSystemPrompt(imageType) {
 	// cargoPhoto
 	return (
 		'You are a computer vision assistant for a Hazmat Load Audit System. ' +
+		'ANTI-HALLUCINATION RULE — CRITICAL:\n' +
+		'- UN Number: ONLY extract if you physically see 4 digits preceded by "UN" or "NA" on a label. ' +
+		'If no UN number is printed/visible → set unNumber to null. NEVER infer UN number from class or product name.\n' +
+		'- Hazard Class: read ONLY from the DOT diamond color and bottom digit. ' +
+		'Red diamond = Class 3 (Flammable). Black/white = Class 8. NEVER guess from context.\n\n' +
 		'You will receive exactly ONE image of cargo inside a vehicle. ' +
 		'READ ALL VALUES ONLY FROM WHAT IS PHYSICALLY VISIBLE IN THIS IMAGE. Never use memory.\n\n' +
 		'Specifically check for this image:\n' +
@@ -156,6 +173,8 @@ function buildSystemPrompt(imageType) {
 		'CRITICAL OUTPUT RULE:\n' +
 		'- If there is exactly ONE hazmat entry visible → respond with a single JSON object.\n' +
 		'- If there are TWO OR MORE distinct hazmat entries → respond with a JSON ARRAY of objects, one per entry.\n' +
+		'- STRICT SCHEMA RULE: The "extracted" field MUST NEVER BE AN ARRAY. If you have multiple entries, return a ROOT array of objects, like this:\n' +
+		'  [ { "slotName": "bol", "extracted": {...} }, { "slotName": "bol", "extracted": {...} } ]\n' +
 		'- Never use comma-separated UN numbers or hazard classes inside a single object.\n\n' +
 		'Each object in the array (or the single object) must follow this exact shape:\n' +
 		'{\n' +
@@ -318,7 +337,7 @@ async function analyzeImageWithClaude(files, imageType) {
 		  'Find and extract: UN number (4 digits after "UN" or "NA"), ' +
 		  'hazard class (number like 2, 2.2, 3, 8, 9), ' +
 		  'packing group (Roman numerals I, II, III), ' +
-		  'HM column marking (X or RQ next to hazmat line). ' +
+		  'HM column marking: look for X or RQ in the narrow "HM(X)" column on the cargo line itself, not the header row. ' +
 		  'These may be in narrow columns, inline in description text, handwritten, or small print. ' +
 		  'Report ONLY what you actually read from this document. Respond ONLY with JSON.'
 		: 'Analyze this image and respond ONLY with JSON.';
