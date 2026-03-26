@@ -60,7 +60,7 @@ function buildSystemPrompt(imageType) {
 			'STEP 2: EXTRACT REMAINING FIELDS\n' +
 			'- Packing Group: Roman numerals (I, II, III) where required.\n' +
 			'- HM Column Marking: "X" or "RQ" marking in hazardous material column.\n' +
-			'- Emergency Phone: 24-Hour monitored phone number (e.g., CHEMTREC).\n' +
+			'- Emergency Phone: Extract ALL visible 24-Hour monitored phone numbers. You MUST put all found numbers in "mainValue" separated by a semicolon (e.g., "+1-800-424-9300; +1-703-527-3887"). In "meaning", specify the purpose of each number respectively (e.g., "USA; International").\n' +
 			'- Shipper Certification: Check if the signature block at the bottom is signed.\n\n' +
 			'FIELD DEFINITIONS (CRITICAL - BOOLEANS ONLY):\n' +
 			'- properShippingNameValid: MUST BE A BOOLEAN. true if the printed name appears to be a valid DOT name (e.g., "TOLUENE", "COATING SOLUTION", "CORROSIVE LIQUID, N.O.S."). ' +
