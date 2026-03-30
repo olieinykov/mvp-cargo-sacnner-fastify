@@ -42,121 +42,38 @@ export const getAuditsSchema = {
 	},
 };
 
+const imageFileSchema = {
+	type: 'object',
+	required: ['filename', 'mimetype'],
+	properties: {
+		filename: { type: 'string' },
+		mimetype: { type: 'string' },
+		_buf:     { type: 'object' },
+	},
+};
+
 export const createAuditSchema = {
 	tags: ['Audit'],
 	summary: 'Create new audit',
-	description: 'Create new audit',
+	description: 'Create new audit — all images are passed in a single "images" field; Claude auto-classifies each one.',
 	consumes: ['multipart/form-data'],
 	body: {
 		type: 'object',
-		required: ['bol', 'placard', 'intrier'/*, 'exterier'*/],
+		required: ['images'],
 		properties: {
-			bol: {
-				// With multipart uploads the same field may be provided once (object)
-				// or multiple times (array). We support both shapes.
+			// A single field accepting one image (object) or multiple images (array).
+			// Claude will classify each image as bolPhoto / markerPhoto / cargoPhoto.
+			images: {
 				anyOf: [
-					{
-						type: 'object',
-						required: ['filename', 'mimetype'],
-						properties: {
-							filename: { type: 'string' },
-							mimetype: { type: 'string' },
-							_buf: { type: 'object' },
-						},
-					},
+					imageFileSchema,
 					{
 						type: 'array',
-						maxItems: 5,
-						items: {
-							type: 'object',
-							required: ['filename', 'mimetype'],
-							properties: {
-								filename: { type: 'string' },
-								mimetype: { type: 'string' },
-								_buf: { type: 'object' },
-							},
-						},
+						minItems: 1,
+						maxItems: 15,
+						items: imageFileSchema,
 					},
 				],
 			},
-			placard: {
-				anyOf: [
-					{
-						type: 'object',
-						required: ['filename', 'mimetype'],
-						properties: {
-							filename: { type: 'string' },
-							mimetype: { type: 'string' },
-							_buf: { type: 'object' },
-						},
-					},
-					{
-						type: 'array',
-						maxItems: 5,
-						items: {
-							type: 'object',
-							required: ['filename', 'mimetype'],
-							properties: {
-								filename: { type: 'string' },
-								mimetype: { type: 'string' },
-								_buf: { type: 'object' },
-							},
-						},
-					},
-				],
-			},
-			intrier: {
-				anyOf: [
-					{
-						type: 'object',
-						required: ['filename', 'mimetype'],
-						properties: {
-							filename: { type: 'string' },
-							mimetype: { type: 'string' },
-							_buf: { type: 'object' },
-						},
-					},
-					{
-						type: 'array',
-						maxItems: 5,
-						items: {
-							type: 'object',
-							required: ['filename', 'mimetype'],
-							properties: {
-								filename: { type: 'string' },
-								mimetype: { type: 'string' },
-								_buf: { type: 'object' },
-							},
-						},
-					},
-				],
-			},
-			//exterier: {
-			//	anyOf: [
-			//		{
-			//			type: 'object',
-			//			required: ['filename', 'mimetype'],
-			//			properties: {
-			//				filename: { type: 'string' },
-			//				mimetype: { type: 'string' },
-			//				_buf: { type: 'object' },
-			//			},
-			//		},
-			//		{
-			//			type: 'array',
-			//			maxItems: 3,
-			//			items: {
-			//				type: 'object',
-			//				required: ['filename', 'mimetype'],
-			//				properties: {
-			//					filename: { type: 'string' },
-			//					mimetype: { type: 'string' },
-			//					_buf: { type: 'object' },
-			//				},
-			//			},
-			//		},
-			//	],
-			//},
 		},
 	},
 };

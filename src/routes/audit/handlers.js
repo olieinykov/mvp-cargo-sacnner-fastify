@@ -359,6 +359,114 @@ async function analyzeImageWithClaude(files, imageType) {
 // async function analyzeExterierWithClaude(files) { ... }
 
 // ==========================
+// Image classification
+// ==========================
+
+const CLASSIFY_SYSTEM_PROMPT =
+	'You are an image classifier for a Hazmat Load Audit System. ' +
+	'Your ONLY job is to look at the provided image and return exactly ONE of these three category labels:\n\n' +
+	'  "bolPhoto"     — A Bill of Lading (BOL) or shipping paper document. ' +
+	'Recognisable by printed tables, text fields, shipper/consignee information, signatures, and form-like layout.\n' +
+	'  "markerPhoto"  — The rear or side exterior of a truck trailer showing hazmat placards / diamond-shaped warning signs ' +
+	'mounted on the doors or sides. May also show the trailer number and carrier name on the outside.\n' +
+	'  "cargoPhoto"   — The interior of a trailer or truck showing the loaded cargo (boxes, drums, pallets, straps, etc.).\n\n' +
+	'Rules:\n' +
+	'- Respond ONLY with a JSON object: { "imageType": "<label>" }\n' +
+	'- Do NOT include any explanation, markdown, or extra fields.\n' +
+	'- If truly ambiguous, pick the closest match — never return null or an unknown label.';
+
+/**
+ * Asks Claude to classify a single image as bolPhoto / markerPhoto / cargoPhoto.
+ * Returns the imageType string.
+ */
+async function classifyImage(file) {
+	let response;
+	try {
+		response = await getClient().messages.create({
+			model: process.env.CLAUDE_VISION_MODEL,
+			max_tokens: 64,
+			system: CLASSIFY_SYSTEM_PROMPT,
+			messages: [
+				{
+					role: 'user',
+					content: [
+						{
+							type: 'image',
+							source: {
+								type: 'base64',
+								media_type: file.mimetype,
+								data: encodeImageToBase64(file.buffer),
+							},
+						},
+						{ type: 'text', text: 'Classify this image.' },
+					],
+				},
+			],
+		});
+	} catch (err) {
+		throw Object.assign(new Error(`Claude classify error: ${err.message}`), { statusCode: 502 });
+	}
+
+	const textBlock = response.content.find((b) => b.type === 'text');
+	if (!textBlock?.text) {
+		throw Object.assign(new Error('Claude returned empty classification response.'), { statusCode: 502 });
+	}
+
+	let parsed;
+	try {
+		let clean = textBlock.text.replace(/```json\s*|```\s*/g, '').trim();
+		if (!clean.startsWith('{')) {
+			const m = clean.match(/\{[\s\S]*\}/);
+			if (m) clean = m[0];
+		}
+		parsed = JSON.parse(clean);
+	} catch (e) {
+		throw Object.assign(new Error(`Failed to parse classification JSON: ${e.message}`), { statusCode: 502 });
+	}
+
+	const VALID_TYPES = ['bolPhoto', 'markerPhoto', 'cargoPhoto'];
+	if (!VALID_TYPES.includes(parsed.imageType)) {
+		throw Object.assign(
+			new Error(`Claude returned unknown image type: "${parsed.imageType}"`),
+			{ statusCode: 502 },
+		);
+	}
+
+	return parsed.imageType;
+}
+
+/**
+ * 1. Classifies every file in parallel.
+ * 2. Groups files by detected imageType.
+ * 3. Runs analyzeImageWithClaude for each non-empty group.
+ * Returns { bolResults, markerResults, cargoResults }.
+ */
+async function classifyAndAnalyzeAll(files) {
+	// Step 1: classify all images in parallel
+	const classifiedFiles = await Promise.all(
+		files.map(async (f) => {
+			const imageType = await classifyImage({ buffer: f._buf, mimetype: f.mimetype });
+			return { file: f, imageType };
+		}),
+	);
+
+	// Step 2: group by type
+	const groups = { bolPhoto: [], markerPhoto: [], cargoPhoto: [] };
+	for (const { file, imageType } of classifiedFiles) {
+		groups[imageType].push(file);
+	}
+
+	// Step 3: analyze each group (empty group → empty array, no API call)
+	const [bolResults, markerResults, cargoResults] = await Promise.all([
+		groups.bolPhoto.length     ? analyzeImageWithClaude(groups.bolPhoto,     'bolPhoto')     : Promise.resolve([]),
+		groups.markerPhoto.length  ? analyzeImageWithClaude(groups.markerPhoto,  'markerPhoto')  : Promise.resolve([]),
+		groups.cargoPhoto.length   ? analyzeImageWithClaude(groups.cargoPhoto,   'cargoPhoto')   : Promise.resolve([]),
+	]);
+
+	return { bolResults, markerResults, cargoResults };
+}
+
+// ==========================
 // Audit logic — Rules Engine
 // ==========================
 
@@ -373,25 +481,12 @@ async function analyzeImageWithClaude(files, imageType) {
 // 49 CFR 177.848 — forbidden segregation pairs by hazard class.
 // Each entry means: class A cannot be loaded with class B.
 const FORBIDDEN_COMBINATIONS = [
-	['1', '1'],   // incompatible explosive divisions handled separately, simplified here
-	['1', '3'],
-	['1', '4'],
-	['1', '5'],
-	['1', '6'],
-	['1', '8'],
-	['3', '5.1'],
-	['3', '5.2'],
-	['4.1', '5.1'],
-	['4.2', '5.1'],
-	['4.3', '5.1'],
-	['4.3', '8'],
-	['5.1', '3'],
-	['5.1', '4.1'],
-	['5.1', '4.2'],
-	['5.1', '4.3'],
-	['5.1', '6.1'],
-	['5.1', '8'],
-	['6.1', '5.1'],
+    ['2.1', '2.3'], ['3', '2.3'], ['4.1', '2.3'], 
+    ['4.2', '2.3'], ['4.3', '2.3'], ['5.1', '2.3'], ['5.2', '2.3'],
+    ['4.2', '8'],
+    ['1', '2.1'], ['1', '2.2'], ['1', '2.3'], ['1', '3'], 
+    ['1', '4.1'], ['1', '4.2'], ['1', '4.3'], ['1', '5.1'], 
+    ['1', '5.2'], ['1', '6.1'], ['1', '8']
 ];
 
 function isForbiddenCombination(classA, classB) {
@@ -901,42 +996,26 @@ function runAudit(bolResults, markerResults, cargoResults/*, exterierResults*/) 
 // ==========================
 
 export async function createAudit(request, reply) {
-	const { bol, placard, intrier/*, exterier*/ } = request.body; // TODO: exterior slot temporarily disabled
+	// Accept all images in a single "images" field (array or single file).
+	// Claude auto-classifies each image (bolPhoto / markerPhoto / cargoPhoto) before extraction.
+	const allFiles = toArray(request.body.images);
 
-	const bolFiles      = toArray(bol);
-	const placardFiles  = toArray(placard);
-	const intierFiles   = toArray(intrier);
-	// const exterierFiles = toArray(exterier);
+	if (allFiles.length === 0) {
+		return reply.code(400).send({ error: 'Field "images" is required.' });
+	}
 
-	const slots = [
-		{ files: bolFiles,      name: 'bol' },
-		{ files: placardFiles,  name: 'placard' },
-		{ files: intierFiles,   name: 'intrier' },
-		// { files: exterierFiles, name: 'exterier' }, // TODO: exterior disabled
-	];
-
-	for (const { files, name } of slots) {
-		if (files.length === 0) {
-			return reply.code(400).send({ error: `Field "${name}" is required.` });
+	for (const file of allFiles) {
+		if (!file.mimetype || !file.mimetype.startsWith('image/')) {
+			return reply.code(400).send({ error: `All files in "images" must be images (image/*). Got: ${file.mimetype}` });
 		}
-		for (const file of files) {
-			if (!file.mimetype || !file.mimetype.startsWith('image/')) {
-				return reply.code(400).send({ error: `Field "${name}" must be an image (image/*). Got: ${file.mimetype}` });
-			}
-			if (!file._buf || file._buf.length === 0) {
-				return reply.code(400).send({ error: `Field "${name}" contains an empty file.` });
-			}
+		if (!file._buf || file._buf.length === 0) {
+			return reply.code(400).send({ error: 'One or more files in "images" are empty.' });
 		}
 	}
 
 	let bolResults, markerResults, cargoResults;
 	try {
-		[bolResults, markerResults, cargoResults] = await Promise.all([
-			analyzeImageWithClaude(bolFiles,     'bolPhoto'),
-			analyzeImageWithClaude(placardFiles, 'markerPhoto'),
-			analyzeImageWithClaude(intierFiles,  'cargoPhoto'),
-			// analyzeExterierWithClaude(exterierFiles), // TODO: exterior disabled
-		]);
+		({ bolResults, markerResults, cargoResults } = await classifyAndAnalyzeAll(allFiles));
 	} catch (err) {
 		return reply.code(err.statusCode ?? 502).send({ error: err.message });
 	}
