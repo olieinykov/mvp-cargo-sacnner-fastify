@@ -561,6 +561,18 @@ function runAudit(bolResults, markerResults, cargoResults/*, exterierResults*/) 
 			.filter((token) => token && /^\d{4}$/.test(token));
 	};
 
+	// Helper to check if a specific subclass matches a base class on a placard/label
+    const isClassMatch = (cls1, cls2) => {
+        if (cls1 === cls2) return true;
+        
+        const base1 = String(cls1).split('.')[0];
+        const base2 = String(cls2).split('.')[0];
+        
+        if (cls1 === base2 || cls2 === base1) return true;
+        
+        return false;
+    };
+
 	// Helper to add an issue only if not already present (same cfr + check + message)
 	const addIssue = (issue) => {
 		const dup = issues.some(
@@ -694,31 +706,32 @@ function runAudit(bolResults, markerResults, cargoResults/*, exterierResults*/) 
 	const placardUNs     = [...new Set(markerResults .flatMap((m) => parseUNs(v(m.extracted?.unNumber))))];
 
 	// BOL classes that have no matching placard class
-	for (const bc of bolClasses) {
-		if (placardClasses.length > 0 && !placardClasses.includes(bc)) {
-			addIssue({
-				source: 'CROSS',
-				severity: 'CRITICAL',
-				cfr: '49 CFR 172.504(a)',
-				check: 'BOL-Placard Class Match',
-				message: `BOL declares Class ${bc} but no placard with this class was found (placard classes: ${placardClasses.join(', ')}).`,
-				fix: `Ensure at least one placard displays Class ${bc} on all 4 sides of the trailer.`,
-			});
-		}
-	}
-	// Placard classes that have no matching BOL class
-	for (const pc of placardClasses) {
-		if (bolClasses.length > 0 && !bolClasses.includes(pc)) {
-			addIssue({
-				source: 'CROSS',
-				severity: 'CRITICAL',
-				cfr: '49 CFR 172.504(a)',
-				check: 'BOL-Placard Class Match',
-				message: `Placard shows Class ${pc} but this class is not declared on any BOL (BOL classes: ${bolClasses.join(', ')}).`,
-				fix: `Remove or replace the incorrect Class ${pc} placard, or update the BOL to include this class.`,
-			});
-		}
-	}
+    for (const bc of bolClasses) {
+        if (placardClasses.length > 0 && !placardClasses.some((pc) => isClassMatch(bc, pc))) {
+            addIssue({
+                source: 'CROSS',
+                severity: 'CRITICAL',
+                cfr: '49 CFR 172.504(a)',
+                check: 'BOL-Placard Class Match',
+                message: `BOL declares Class ${bc} but no matching placard was found (placard classes: ${placardClasses.join(', ')}).`,
+                fix: `Ensure at least one placard displaying Class ${bc} (or its base class) is present on all 4 sides of the trailer.`,
+            });
+        }
+    }
+
+    // Placard classes that have no matching BOL class
+    for (const pc of placardClasses) {
+        if (bolClasses.length > 0 && !bolClasses.some((bc) => isClassMatch(bc, pc))) {
+            addIssue({
+                source: 'CROSS',
+                severity: 'CRITICAL',
+                cfr: '49 CFR 172.504(a)',
+                check: 'BOL-Placard Class Match',
+                message: `Placard shows Class ${pc} but this class is not declared on any BOL (BOL classes: ${bolClasses.join(', ')}).`,
+                fix: `Remove or replace the incorrect Class ${pc} placard, or update the BOL to include this class.`,
+            });
+        }
+    }
 
 	// BOL UN numbers that have no matching placard UN
 	for (const bu of bolUNs) {
@@ -755,31 +768,32 @@ function runAudit(bolResults, markerResults, cargoResults/*, exterierResults*/) 
 	const cargoUNs     = [...new Set(cargoResults.flatMap((c) => parseUNs(v(c.extracted?.unNumber))))];
 
 	// BOL classes that have no matching cargo class
-	for (const bc of bolClasses) {
-		if (cargoClasses.length > 0 && !cargoClasses.includes(bc)) {
-			addIssue({
-				source: 'CROSS',
-				severity: 'CRITICAL',
-				cfr: '49 CFR 172.400',
-				check: 'BOL-Package Class Match',
-				message: `BOL declares Class ${bc} but no cargo package label with this class was found (cargo classes: ${cargoClasses.join(', ')}).`,
-				fix: 'Ensure package labels match the hazard class declared on the BOL.',
-			});
-		}
-	}
-	// Cargo classes that have no matching BOL class
-	for (const cc of cargoClasses) {
-		if (bolClasses.length > 0 && !bolClasses.includes(cc)) {
-			addIssue({
-				source: 'CROSS',
-				severity: 'CRITICAL',
-				cfr: '49 CFR 172.400',
-				check: 'BOL-Package Class Match',
-				message: `Cargo package shows Class ${cc} but this class is not declared on any BOL (BOL classes: ${bolClasses.join(', ')}).`,
-				fix: 'Update the BOL to include all hazard classes present on cargo packages, or re-label the packages.',
-			});
-		}
-	}
+    for (const bc of bolClasses) {
+        if (cargoClasses.length > 0 && !cargoClasses.some((cc) => isClassMatch(bc, cc))) {
+            addIssue({
+                source: 'CROSS',
+                severity: 'CRITICAL',
+                cfr: '49 CFR 172.400',
+                check: 'BOL-Package Class Match',
+                message: `BOL declares Class ${bc} but no cargo package label matching this class was found (cargo classes: ${cargoClasses.join(', ')}).`,
+                fix: 'Ensure package labels match the hazard class declared on the BOL.',
+            });
+        }
+    }
+
+    // Cargo classes that have no matching BOL class
+    for (const cc of cargoClasses) {
+        if (bolClasses.length > 0 && !bolClasses.some((bc) => isClassMatch(bc, cc))) {
+            addIssue({
+                source: 'CROSS',
+                severity: 'CRITICAL',
+                cfr: '49 CFR 172.400',
+                check: 'BOL-Package Class Match',
+                message: `Cargo package shows Class ${cc} but this class is not declared on any BOL (BOL classes: ${bolClasses.join(', ')}).`,
+                fix: 'Update the BOL to include all hazard classes present on cargo packages, or re-label the packages.',
+            });
+        }
+    }
 
 	// BOL UN numbers that have no matching cargo UN
 	for (const bu of bolUNs) {
