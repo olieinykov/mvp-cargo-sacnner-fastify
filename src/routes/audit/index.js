@@ -1,5 +1,5 @@
-import { createAudit, getAudits } from './handlers.js';
-import { createAuditSchema, getAuditsSchema } from './schema.js';
+import { createAudit, getAudits, uploadAuditImages } from './handlers.js';
+import { createAuditSchema, getAuditsSchema, uploadAuditImagesSchema } from './schema.js';
 import multipart from '@fastify/multipart';
 
 const routes = async (fastify) => {
@@ -13,6 +13,11 @@ const routes = async (fastify) => {
 	fastify.post('/', {
 		handler: createAudit,
 		schema: createAuditSchema,
+	});
+
+	fastify.post('/upload', {
+		handler: uploadAuditImages,
+		schema: uploadAuditImagesSchema,
 	});
 
 	fastify.get('/', {

@@ -7,4 +7,5 @@ export const audits = pgTable('audits', {
   is_passed:  text('is_passed').notNull(),              
   score:      text('score').notNull(),                  
   created_at: timestamp('created_at').defaultNow().notNull(),
+  auditImages: jsonb('audit_images').default([]),
 });

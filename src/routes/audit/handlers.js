@@ -2,6 +2,27 @@ import { requireAnthropic } from '../../lib/cloudeClient.js';
 import { db } from '../../db/connection.js';
 import { audits } from '../../db/schema.js';
 import { count, desc } from 'drizzle-orm';
+import { createClient } from '@supabase/supabase-js';
+import { randomUUID } from 'node:crypto';
+
+// ==========================
+// Supabase client
+// ==========================
+ 
+const getSupabase = () => {
+	const url    = process.env.SUPABASE_URL;
+	const key    = process.env.SUPABASE_SERVICE_ROLE_KEY;
+	const bucket = 'audit-images';
+ 
+	if (!url || !key) {
+		throw Object.assign(
+			new Error('SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY env vars are required.'),
+			{ statusCode: 500 },
+		);
+	}
+ 
+	return { client: createClient(url, key), bucket };
+};
 
 // ==========================
 // Claude client
@@ -12,10 +33,6 @@ const getClient = () => requireAnthropic();
 // ==========================
 // Helpers
 // ==========================
-
-function encodeImageToBase64(buffer) {
-	return Buffer.isBuffer(buffer) ? buffer.toString('base64') : Buffer.from(buffer).toString('base64');
-}
 
 function toArray(field) {
 	return Array.isArray(field) ? field : [field];
@@ -250,9 +267,8 @@ async function callClaude(systemPrompt, file, userText) {
 						{
 							type: 'image',
 							source: {
-								type: 'base64',
-								media_type: file.mimetype,
-								data: encodeImageToBase64(file.buffer),
+								type: 'url',
+								url: file.url
 							},
 						},
 						{ type: 'text', text: userText },
@@ -348,7 +364,7 @@ async function analyzeImageWithClaude(files, imageType) {
 	// callClaude returns an array per file (1 item for single-entry, N for multi-entry).
 	// Flatten so bolResults / markerResults / cargoResults are always flat arrays.
 	const nestedResults = await Promise.all(
-		files.map((f) => callClaude(systemPrompt, { buffer: f._buf, mimetype: f.mimetype }, userText)),
+		files.map((f) => callClaude(systemPrompt, { url: f.url, mimetype: f.mimetype }, userText)),
 	);
 	const results = nestedResults.flat();
 
@@ -393,9 +409,8 @@ async function classifyImage(file) {
 						{
 							type: 'image',
 							source: {
-								type: 'base64',
-								media_type: file.mimetype,
-								data: encodeImageToBase64(file.buffer),
+								type: 'url',
+								url:  file.url,
 							},
 						},
 						{ type: 'text', text: 'Classify this image.' },
@@ -442,29 +457,33 @@ async function classifyImage(file) {
  * Returns { bolResults, markerResults, cargoResults }.
  */
 async function classifyAndAnalyzeAll(files) {
-	// Step 1: classify all images in parallel
 	const classifiedFiles = await Promise.all(
 		files.map(async (f) => {
-			const imageType = await classifyImage({ buffer: f._buf, mimetype: f.mimetype });
+			const imageType = await classifyImage({ url: f.url, mimetype: f.mimetype });
 			return { file: f, imageType };
 		}),
 	);
-
-	// Step 2: group by type
+ 
 	const groups = { bolPhoto: [], markerPhoto: [], cargoPhoto: [] };
 	for (const { file, imageType } of classifiedFiles) {
 		groups[imageType].push(file);
 	}
-
-	// Step 3: analyze each group (empty group → empty array, no API call)
+ 
 	const [bolResults, markerResults, cargoResults] = await Promise.all([
-		groups.bolPhoto.length     ? analyzeImageWithClaude(groups.bolPhoto,     'bolPhoto')     : Promise.resolve([]),
-		groups.markerPhoto.length  ? analyzeImageWithClaude(groups.markerPhoto,  'markerPhoto')  : Promise.resolve([]),
-		groups.cargoPhoto.length   ? analyzeImageWithClaude(groups.cargoPhoto,   'cargoPhoto')   : Promise.resolve([]),
+		groups.bolPhoto.length    ? analyzeImageWithClaude(groups.bolPhoto,    'bolPhoto')    : Promise.resolve([]),
+		groups.markerPhoto.length ? analyzeImageWithClaude(groups.markerPhoto, 'markerPhoto') : Promise.resolve([]),
+		groups.cargoPhoto.length  ? analyzeImageWithClaude(groups.cargoPhoto,  'cargoPhoto')  : Promise.resolve([]),
 	]);
-
-	return { bolResults, markerResults, cargoResults };
+ 
+	// Return classifiedFiles so createAudit can tag each image URL with its slot type
+	return { bolResults, markerResults, cargoResults, classifiedFiles };
 }
+
+const IMAGE_TYPE_TO_SLOT = {
+	bolPhoto:    'bol',
+	markerPhoto: 'placard',
+	cargoPhoto:  'cargo',
+};
 
 // ==========================
 // Audit logic — Rules Engine
@@ -1006,60 +1025,101 @@ function runAudit(bolResults, markerResults, cargoResults/*, exterierResults*/) 
 }
 
 // ==========================
+// POST /audit/upload
+// ==========================
+ 
+export async function uploadAuditImages(request, reply) {
+	const allFiles = toArray(request.body.images);
+ 
+	if (allFiles.length === 0) {
+		return reply.code(400).send({ error: 'Field "images" is required.' });
+	}
+ 
+	for (const file of allFiles) {
+		if (!file.mimetype || !file.mimetype.startsWith('image/')) {
+			return reply.code(400).send({ error: `All files must be images (image/*). Got: ${file.mimetype}` });
+		}
+		if (!file._buf || file._buf.length === 0) {
+			return reply.code(400).send({ error: 'One or more files are empty.' });
+		}
+	}
+ 
+	const { client: supabase, bucket } = getSupabase();
+ 
+	const uploaded = await Promise.all(
+		allFiles.map(async (file) => {
+			const ext = file.mimetype.split('/')[1] ?? 'jpg';
+			const storageId = `${randomUUID()}.${ext}`;
+ 
+			const { error } = await supabase.storage
+				.from(bucket)
+				.upload(storageId, file._buf, { contentType: file.mimetype, upsert: false });
+ 
+			if (error) {
+				throw Object.assign(new Error(`Supabase upload failed: ${error.message}`), { statusCode: 502 });
+			}
+ 
+			const { data: publicData } = supabase.storage.from(bucket).getPublicUrl(storageId);
+ 
+			return { id: storageId, url: publicData.publicUrl };
+		}),
+	);
+ 
+	return reply.send({ images: uploaded });
+}
+
+// ==========================
 // Route handler
 // ==========================
 
 export async function createAudit(request, reply) {
-	// Accept all images in a single "images" field (array or single file).
-	// Claude auto-classifies each image (bolPhoto / markerPhoto / cargoPhoto) before extraction.
-	const allFiles = toArray(request.body.images);
-
-	if (allFiles.length === 0) {
-		return reply.code(400).send({ error: 'Field "images" is required.' });
+	const { imageIds } = request.body;
+ 
+	if (!Array.isArray(imageIds) || imageIds.length === 0) {
+		return reply.code(400).send({ error: 'Field "imageIds" must be a non-empty array of storage IDs.' });
 	}
-
-	for (const file of allFiles) {
-		if (!file.mimetype || !file.mimetype.startsWith('image/')) {
-			return reply.code(400).send({ error: `All files in "images" must be images (image/*). Got: ${file.mimetype}` });
-		}
-		if (!file._buf || file._buf.length === 0) {
-			return reply.code(400).send({ error: 'One or more files in "images" are empty.' });
-		}
-	}
-
-	let bolResults, markerResults, cargoResults;
+ 
+	const { client: supabase, bucket } = getSupabase();
+ 
+	// Resolve public URLs and detect mimetype from file extension.
+	const MIME_MAP = { jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', webp: 'image/webp', gif: 'image/gif' };
+	const files = imageIds.map((id) => {
+		const { data } = supabase.storage.from(bucket).getPublicUrl(id);
+		const ext      = id.split('.').pop()?.toLowerCase() ?? 'jpeg';
+		return { id, url: data.publicUrl, mimetype: MIME_MAP[ext] ?? 'image/jpeg' };
+	});
+ 
+	let bolResults, markerResults, cargoResults, classifiedFiles;
 	try {
-		({ bolResults, markerResults, cargoResults } = await classifyAndAnalyzeAll(allFiles));
+		({ bolResults, markerResults, cargoResults, classifiedFiles } = await classifyAndAnalyzeAll(files));
 	} catch (err) {
 		return reply.code(err.statusCode ?? 502).send({ error: err.message });
 	}
-
-	const audit = runAudit(bolResults, markerResults, cargoResults/*, exterierResults*/);
-
-	const auditResponse = {
-		bol:      bolResults,
-		marker:   markerResults,
-		cargo:    cargoResults,
-		// exterier: exterierResults, // TODO: exterior disabled
-		audit,
-	};
-
+ 
+	const audit = runAudit(bolResults, markerResults, cargoResults);
+ 
+	const auditResponse = { bol: bolResults, marker: markerResults, cargo: cargoResults, audit };
+ 
+	// Each image stored with its detected slot type so the UI can show them per-section
+	const auditImages = classifiedFiles.map(({ file, imageType }) => ({
+		url:  file.url,
+		type: IMAGE_TYPE_TO_SLOT[imageType] ?? 'cargo',
+	}));
+ 
 	let savedId = null;
 	try {
 		const [saved] = await db.insert(audits).values({
-			response:  auditResponse,
-			is_passed: String(audit.is_passed),
-			score:     String(audit.score),
+			response:    auditResponse,
+			is_passed:   String(audit.is_passed),
+			score:       String(audit.score),
+			auditImages,
 		}).returning({ id: audits.id });
 		savedId = saved.id;
 	} catch (err) {
 		console.error('Failed to save audit to DB:', err.message);
 	}
-
-	return reply.send({
-		id: savedId,
-		...auditResponse,
-	});
+ 
+	return reply.send({ id: savedId, auditImages, ...auditResponse });
 }
 
 // ==========================
@@ -1079,6 +1139,7 @@ export async function getAudits(request, reply) {
 					score:      audits.score,
 					created_at: audits.created_at,
 					response:   audits.response,
+					auditImages: audits.auditImages,
 				})
 				.from(audits)
 				.orderBy(desc(audits.created_at))
