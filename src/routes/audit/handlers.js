@@ -4,6 +4,7 @@ import { audits } from '../../db/schema.js';
 import { count, desc } from 'drizzle-orm';
 import { createClient } from '@supabase/supabase-js';
 import { randomUUID } from 'node:crypto';
+import hazmatTable from '../../data/hazmat_data.json' with { type: 'json' };
 
 // ==========================
 // Supabase client
@@ -65,63 +66,61 @@ function buildSystemPrompt(imageType) {
 		'- If labels unclear or too small — set hazardClass to null and lower confidence. Do NOT guess.\n\n';
 
 	if (imageType === 'bolPhoto') {
-		return (
-			'You are a strict computer vision assistant for a Hazmat Load Audit System. ' +
-			'You will receive exactly ONE image of a BOL / shipping paper document. ' +
-			'Follow these steps EXACTLY:\n\n' +
-			'STEP 1: STRICT TEXT PARSING (ANTI-HALLUCINATION)\n' +
-			'- Act as a literal text scanner. DO NOT use your internal hazmat database. DO NOT autocomplete or guess.\n' +
-			'- Find the letters "UN" or "NA" in the description. Extract EXACTLY the 4 digits physically printed immediately after them.\n' +
-			'- NEVER alter the printed UN number to match the Proper Shipping Name.\n' +
-			'- Hazard Class: Extract ONLY the number (e.g., "8", "3") printed in the hazmat description. COMPLETELY IGNORE the right-hand table column labeled "Class or Rate".\n\n' +
-			'STEP 2: EXTRACT REMAINING FIELDS\n' +
-			'- Packing Group: Roman numerals (I, II, III) where required.\n' +
-			'- HM Column Marking: "X" or "RQ" marking in hazardous material column.\n' +
-			'- Emergency Phone: Extract ALL visible 24-Hour monitored phone numbers. You MUST put all found numbers in "mainValue" separated by a semicolon (e.g., "+1-800-424-9300; +1-703-527-3887"). In "meaning", specify the purpose of each number respectively (e.g., "USA; International").\n' +
-			'- Shipper Certification: Check if the signature block at the bottom is signed.\n\n' +
-			'FIELD DEFINITIONS (CRITICAL - BOOLEANS ONLY):\n' +
-			'- properShippingNameValid: MUST BE A BOOLEAN. true if the printed name appears to be a valid DOT name (e.g., "TOLUENE", "COATING SOLUTION", "CORROSIVE LIQUID, N.O.S."). ' +
-			'false ONLY if it is clearly a trade/brand name or product description with no DOT equivalent. ' +
-			'When in doubt, set null — do NOT default to false.\n' +
-			'- entrySequenceCompliant: true if entry follows DOT order (name → class → UN → PG). false if order differs. null if uncertain.\n' +
-			'- hmColumnMarked: Search the ENTIRE document — not just the table column — for an "X" or "RQ" ' +
-			'associated with the hazmat line item. On many BOL formats the HM column is merged with other columns ' +
-			'or the marking may appear inline within the description text itself, near the UN number, ' +
-			'or as a standalone character adjacent to the cargo line. ' +
-			'Set true if ANY "X" or "RQ" is found anywhere on the hazmat line row or description block.\n' +
-			'Check if an "X" appears in that column ON THE DATA ROW (not the header). ' +
-			'The column is often very narrow and placed between package count and units columns. ' +
-			'true if X or RQ found on any hazmat data row in that column.\n' +
-			'MULTIPLE HAZMAT ENTRIES:\n' +
-			'- If this document shows TWO OR MORE distinct hazmat line items, return a SEPARATE object for each.\n' +
-			'- PAIRING RULE: pair each UN number with its corresponding hazard class and packing group from that specific line item.\n\n' +
-			HAZMAT_CLASS_REFERENCE +
-			'CRITICAL OUTPUT RULE:\n' +
-			'- ONE hazmat entry → single JSON object.\n' +
-			'- TWO OR MORE hazmat entries → JSON ARRAY of objects, one per entry.\n' +
-			'- STRICT SCHEMA RULE: The "extracted" field MUST NEVER BE AN ARRAY. If you have multiple entries, return a ROOT array of objects, like this:\n' +
-			'  [ { "slotName": "bol", "extracted": {...} }, { "slotName": "bol", "extracted": {...} } ]\n' +
-			'- Never use comma-separated UN numbers or hazard classes inside a single object.\n\n' +
-			'Respond ONLY with this JSON shape:\n' +
-			'{\n' +
-			'  "slotName": "bol",\n' +
-			'    "extracted": {\n' +
-			'      "isValid":                    { "mainValue": false,  "meaning": "" },\n' +
-			'      "properShippingNameValid":    { "mainValue": null,   "meaning": "" },\n' +
-			'      "unNumber":                   { "mainValue": null,   "meaning": "" },\n' +
-			'      "hazardClass":                { "mainValue": null,   "meaning": "" },\n' +
-			'      "packingGroup":               { "mainValue": null,   "meaning": "" },\n' +
-			'      "emergencyPhone":             { "mainValue": null,   "meaning": "" },\n' +
-			'      "hmColumnMarked":             { "mainValue": false,  "meaning": "" },\n' +
-			'      "shipperCertificationPresent":{ "mainValue": false,  "meaning": "" },\n' +
-			'      "entrySequenceCompliant":     { "mainValue": false,  "meaning": "" },\n' +
-			'      "otherNotes": []\n' +
-			'    },\n' +
-			'    "confidence": { "overall": 0.0, "fields": {} },\n' +
-			'  "notes": []\n' +
-			'}'
-		);
-	}
+        return (
+            'You are a strict computer vision assistant for a Hazmat Load Audit System. ' +
+            'You will receive exactly ONE image of a BOL / shipping paper document. ' +
+            'Follow these steps EXACTLY:\n\n' +
+            'STEP 1: STRICT TEXT PARSING (ANTI-HALLUCINATION)\n' +
+            '- Act as a literal text scanner. DO NOT use your internal hazmat database. DO NOT autocomplete or guess.\n' +
+            '- Find the letters "UN" or "NA" in the description. Extract EXACTLY the 4 digits physically printed immediately after them.\n' +
+            '- NEVER alter the printed UN number to match the Proper Shipping Name.\n' +
+            '- Hazard Class: Extract ONLY the number (e.g., "8", "3") printed in the hazmat description. COMPLETELY IGNORE the right-hand table column labeled "Class or Rate".\n\n' +
+            'STEP 2: EXTRACT REMAINING FIELDS\n' +
+            '- Packing Group: Roman numerals (I, II, III) where required.\n' +
+            '- HM Column Marking: "X" or "RQ" marking in hazardous material column.\n' +
+            '- Emergency Phone: Extract ALL visible 24-Hour monitored phone numbers. You MUST put all found numbers in "mainValue" separated by a semicolon (e.g., "+1-800-424-9300; +1-703-527-3887"). In "meaning", specify the purpose of each number respectively (e.g., "USA; International").\n' +
+            '- Shipper Certification: Check if the signature block at the bottom is signed.\n\n' +
+            'FIELD DEFINITIONS (CRITICAL):\n' +
+            '- properShippingName: Extract the EXACT text of the Proper Shipping Name printed on the document (e.g., "TOLUENE", "COATING SOLUTION", "CORROSIVE LIQUID, N.O.S."). Do not alter, guess, or abbreviate the text.\n' +
+            '- entrySequenceCompliant: true if entry follows DOT order (name → class → UN → PG). false if order differs. null if uncertain.\n' +
+            '- hmColumnMarked: Search the ENTIRE document — not just the table column — for an "X" or "RQ" ' +
+            'associated with the hazmat line item. On many BOL formats the HM column is merged with other columns ' +
+            'or the marking may appear inline within the description text itself, near the UN number, ' +
+            'or as a standalone character adjacent to the cargo line. ' +
+            'Set true if ANY "X" or "RQ" is found anywhere on the hazmat line row or description block.\n' +
+            'Check if an "X" appears in that column ON THE DATA ROW (not the header). ' +
+            'The column is often very narrow and placed between package count and units columns. ' +
+            'true if X or RQ found on any hazmat data row in that column.\n' +
+            'MULTIPLE HAZMAT ENTRIES:\n' +
+            '- If this document shows TWO OR MORE distinct hazmat line items, return a SEPARATE object for each.\n' +
+            '- PAIRING RULE: pair each UN number with its corresponding hazard class and packing group from that specific line item.\n\n' +
+            HAZMAT_CLASS_REFERENCE +
+            'CRITICAL OUTPUT RULE:\n' +
+            '- ONE hazmat entry → single JSON object.\n' +
+            '- TWO OR MORE hazmat entries → JSON ARRAY of objects, one per entry.\n' +
+            '- STRICT SCHEMA RULE: The "extracted" field MUST NEVER BE AN ARRAY. If you have multiple entries, return a ROOT array of objects, like this:\n' +
+            '  [ { "slotName": "bol", "extracted": {...} }, { "slotName": "bol", "extracted": {...} } ]\n' +
+            '- Never use comma-separated UN numbers or hazard classes inside a single object.\n\n' +
+            'Respond ONLY with this JSON shape:\n' +
+            '{\n' +
+            '  "slotName": "bol",\n' +
+            '    "extracted": {\n' +
+            '      "isValid":                    { "mainValue": false,  "meaning": "" },\n' +
+            '      "properShippingName":         { "mainValue": null,   "meaning": "" },\n' +
+            '      "unNumber":                   { "mainValue": null,   "meaning": "" },\n' +
+            '      "hazardClass":                { "mainValue": null,   "meaning": "" },\n' +
+            '      "packingGroup":               { "mainValue": null,   "meaning": "" },\n' +
+            '      "emergencyPhone":             { "mainValue": null,   "meaning": "" },\n' +
+            '      "hmColumnMarked":             { "mainValue": false,  "meaning": "" },\n' +
+            '      "shipperCertificationPresent":{ "mainValue": false,  "meaning": "" },\n' +
+            '      "entrySequenceCompliant":     { "mainValue": false,  "meaning": "" },\n' +
+            '      "otherNotes": []\n' +
+            '    },\n' +
+            '    "confidence": { "overall": 0.0, "fields": {} },\n' +
+            '  "notes": []\n' +
+            '}'
+        );
+    }
 
 	if (imageType === 'markerPhoto') {
 		return (
@@ -211,6 +210,62 @@ function buildSystemPrompt(imageType) {
 		'  "notes": []\n' +
 		'}'
 	);
+}
+
+// ==========================
+// Triage: Global Hazmat Check
+// ==========================
+
+async function defineIsHazmat(bolFiles) {
+	if (!bolFiles || bolFiles.length === 0) return false;
+
+	const imageContents = bolFiles.map((file) => ({
+		type: 'image',
+		source: { type: 'url', url: file.url },
+	}));
+
+	const TRIAGE_SYSTEM_PROMPT =
+		'You are a document triage assistant for a Hazmat Load Audit System. ' +
+		'You will receive one or multiple images representing pages of a single Bill of Lading (BOL). ' +
+		'Your ONLY job is to determine if this shipment contains ANY hazardous materials (Hazmat) across ALL pages combined. ' +
+		'Look for UN/NA numbers (e.g., UN1203), hazard classes, or "X" / "RQ" marks in the HM column.\n\n' +
+		'Respond ONLY with a JSON object in this exact format:\n' +
+		'{\n' +
+		'  "isHazmat": true|false,\n' +
+		'  "reasoning": "Brief explanation of what you found and on which page"\n' +
+		'}';
+
+	try {
+		const response = await getClient().messages.create({
+			model: process.env.CLAUDE_VISION_MODEL,
+			max_tokens: 256, 
+			system: TRIAGE_SYSTEM_PROMPT,
+			messages: [
+				{
+					role: 'user',
+					content: [
+						...imageContents,
+						{ type: 'text', text: 'Review all pages and determine if this is a hazmat shipment.' },
+					],
+				},
+			],
+		});
+
+		const textBlock = response.content.find((b) => b.type === 'text');
+		let clean = textBlock.text.replace(/```json\s*|```\s*/g, '').trim();
+		
+		if (!clean.startsWith('{')) {
+			const objMatch = clean.match(/(\{[\s\S]*\})/);
+			if (objMatch) clean = objMatch[1];
+		}
+
+		const parsed = JSON.parse(clean);
+		return parsed.isHazmat === true;
+
+	} catch (err) {
+		console.error('[defineIsHazmat] Error:', err.message);
+		return true; 
+	}
 }
 
 // TODO: exterior slot temporarily disabled
@@ -322,7 +377,7 @@ async function callClaude(systemPrompt, file, userText) {
 // Keys used for deduplication per slot type (compared by mainValue, otherNotes excluded)
 const DEDUP_KEYS = {
 	bol:     ['isValid', 'unNumber', 'hazardClass', 'packingGroup', 'emergencyPhone',
-	          'hmColumnMarked', 'shipperCertificationPresent', 'entrySequenceCompliant', 'properShippingNameValid'],
+	          'hmColumnMarked', 'shipperCertificationPresent', 'entrySequenceCompliant', 'properShippingName'],
 	placard: ['isValid', 'unNumber', 'hazardClass', 'placardCondition', 'correctOrientation', 'fourSidedPlacementVerified'],
 	intrier: ['isValid', 'unNumber', 'hazardClass', 'packageLabelsPresent', 'loadSecured', 'securementType', 'palletUsed', 'noShiftingHazards'],
 };
@@ -469,14 +524,15 @@ async function classifyAndAnalyzeAll(files) {
 		groups[imageType].push(file);
 	}
  
-	const [bolResults, markerResults, cargoResults] = await Promise.all([
+	const [isGlobalHazmat, bolResults, markerResults, cargoResults] = await Promise.all([
+		groups.bolPhoto.length ? defineIsHazmat(groups.bolPhoto) : Promise.resolve(false),
 		groups.bolPhoto.length    ? analyzeImageWithClaude(groups.bolPhoto,    'bolPhoto')    : Promise.resolve([]),
 		groups.markerPhoto.length ? analyzeImageWithClaude(groups.markerPhoto, 'markerPhoto') : Promise.resolve([]),
 		groups.cargoPhoto.length  ? analyzeImageWithClaude(groups.cargoPhoto,  'cargoPhoto')  : Promise.resolve([]),
 	]);
  
 	// Return classifiedFiles so createAudit can tag each image URL with its slot type
-	return { bolResults, markerResults, cargoResults, classifiedFiles };
+	return { bolResults, markerResults, cargoResults, classifiedFiles, isGlobalHazmat };
 }
 
 const IMAGE_TYPE_TO_SLOT = {
@@ -548,7 +604,7 @@ function recommendPlacards(classes) {
 	return recommendations;
 }
 
-function runAudit(bolResults, markerResults, cargoResults/*, exterierResults*/) {
+function runAudit(bolResults, markerResults, cargoResults, isGlobalHazmat/*, exterierResults*/) {
 	const issues = [];
 
 	// Convenience: get mainValue safely
@@ -615,6 +671,161 @@ function runAudit(bolResults, markerResults, cargoResults/*, exterierResults*/) 
 			message: 'UN/NA identification number is missing from all BOL documents.',
 			fix: 'Add the UN/NA number (e.g. UN1170) to the hazmat entry on the BOL.',
 		});
+	}
+
+	if (isGlobalHazmat) {
+		for (const bol of bolResults) {
+			const bolExt = bol.extracted ?? {};
+			const bolUNs = parseUNs(v(bolExt.unNumber));
+
+			for (const unNum of bolUNs) {
+				const cleanUnNum = String(unNum).replace(/\D/g, '');
+
+				if (cleanUnNum.length !== 4) continue;
+
+				const entry = hazmatTable?.[`UN${cleanUnNum}`];
+				if (!entry) continue;
+
+				const expected = entry.expectedData ?? {};
+				const errors   = entry.errors       ?? {};
+				const refs     = entry.references   ?? {};
+
+				// ── 1. Hazard Class ──────────────────────────────────────────
+				const bolClassArr = parseClasses(v(bolExt.hazardClass));
+				if (
+					expected.hazardClass != null &&
+					bolClassArr.length > 0 &&
+					!bolClassArr.some((c) => isClassMatch(c, norm(String(expected.hazardClass))))
+				) {
+					addIssue({
+						source:   'BOL',
+						severity: 'CRITICAL',
+						cfr:      '49 CFR 172.101',
+						check:    'Hazard Class (Global Table)',
+						message:  errors.hazardClassMismatch
+							?? `UN${unNum}: hazard class mismatch. BOL shows ${bolClassArr.join('/')}, expected ${expected.hazardClass}.`,
+						fix: `Correct the hazard class to "${expected.hazardClass}" per the DOT Hazardous Materials Table.`,
+					});
+				}
+
+				// ── 2. Packing Group ─────────────────────────────────────────
+				const bolPG        = v(bolExt.packingGroup);
+				const normalizedPG = bolPG ? String(bolPG).trim().toUpperCase() : null;
+				if (
+					expected.packingGroup != null &&
+					normalizedPG &&
+					normalizedPG !== '—' &&
+					normalizedPG !== '-' &&
+					normalizedPG !== expected.packingGroup.toUpperCase()
+				) {
+					addIssue({
+						source:   'BOL',
+						severity: 'CRITICAL',
+						cfr:      '49 CFR 172.101',
+						check:    'Packing Group (Global Table)',
+						message:  errors.packingGroupMismatch
+							?? `UN${unNum}: packing group mismatch. BOL shows PG ${normalizedPG}, expected PG ${expected.packingGroup}.`,
+						fix: `Correct the packing group to "${expected.packingGroup}" per the DOT Hazardous Materials Table.`,
+					});
+				}
+
+				// ── 3. Proper Shipping Name ───────────────────────────────────
+				const bolPSN      = v(bolExt.properShippingName);
+				const expectedPSN = expected.properShippingName;
+
+				if (
+					expectedPSN != null &&
+					bolPSN      != null &&
+					typeof bolPSN === 'string'
+				) {
+					const normPSN = (str) => {
+						return str
+							.toLowerCase()
+							.replace(/\s*\(.*?\)\s*/g, ' ') 
+							.replace(/\bn\.?o\.?s\.?\b/gi, 'nos')
+							.replace(/[-/]/g, ' ')
+							.replace(/[^a-z0-9\s]/g, '')
+							.replace(/\b(liquid|solid)s\b/g, '$1')
+							.replace(/\bgases\b/g, 'gas')
+							.replace(/\s+/g, ' ')
+							.trim();
+					};
+
+					const bolNorm = normPSN(bolPSN);
+					const expNorm = normPSN(expectedPSN);
+
+					const isMatch = bolNorm === expNorm || bolNorm.startsWith(expNorm);
+
+					if (!isMatch) {
+						addIssue({
+							source:   'BOL',
+							severity: 'MAJOR',
+							cfr:      '49 CFR 172.202(a)(1)',
+							check:    'Proper Shipping Name (Global Table)',
+							message:  `UN${unNum}: proper shipping name mismatch. BOL shows "${bolPSN.trim()}", expected "${expectedPSN}".`,
+							fix: `Use the exact DOT proper shipping name: "${expectedPSN}".`,
+						});
+					}
+				}
+
+				// ── 4. Label Codes ────────────────────────────────────────────
+				if (expected.labelCodes != null) {
+					const requiredLabels = parseClasses(String(expected.labelCodes));
+					const bolCls         = parseClasses(v(bolExt.hazardClass));
+					const missingLabels  = requiredLabels.filter(
+						(rl) => !bolCls.some((bc) => isClassMatch(bc, rl))
+					);
+					if (missingLabels.length > 0) {
+						addIssue({
+							source:   'BOL',
+							severity: 'MAJOR',
+							cfr:      '49 CFR 172.400',
+							check:    'Label Codes (Global Table)',
+							message:  errors.labelingViolation
+								?? `UN${unNum}: missing or incorrect label codes on BOL. Required: ${requiredLabels.join(', ')}.`,
+							fix: `Ensure all required label codes (${requiredLabels.join(', ')}) are reflected on the BOL and cargo packaging.`,
+						});
+					}
+				}
+
+				// ── 5. Packaging references (informational MINOR) ─────────────
+				//if (refs.packagingNonBulk || refs.packagingBulk || refs.packagingExceptions) {
+				//	const parts = [
+				//		refs.packagingExceptions && `Exceptions § ${refs.packagingExceptions.replace('173.', '173.')}`,
+				//		refs.packagingNonBulk    && `Non-bulk § ${refs.packagingNonBulk}`,
+				//		refs.packagingBulk       && `Bulk § ${refs.packagingBulk}`,
+				//	].filter(Boolean).join(', ');
+
+				//	const hasPackagingViolation = v(bolExt.packagingViolation) === true;
+				//	if (hasPackagingViolation) {
+				//		addIssue({
+				//			source:   'BOL',
+				//			severity: 'MAJOR',
+				//			cfr:      '49 CFR 173',
+				//			check:    'Packaging Requirements (Global Table)',
+				//			message:  errors.packagingViolation
+				//				?? `UN${unNum}: packaging requirements violation. Refer to 49 CFR: ${parts}.`,
+				//			fix: `Verify packaging against 49 CFR ${parts}.`,
+				//		});
+				//	}
+				//}
+
+				//if (refs.specialProvisions) {
+				//	const hasSpecialViolation = v(bolExt.specialProvisionsViolation) === true;
+				//	if (hasSpecialViolation) {
+				//		addIssue({
+				//			source:   'BOL',
+				//			severity: 'WARNING',
+				//			cfr:      '49 CFR 172.102',
+				//			check:    'Special Provisions (Global Table)',
+				//			message:  errors.specialProvisionsViolation
+				//				?? `UN${unNum}: special provisions violation (${refs.specialProvisions}). See 49 CFR § 172.102.`,
+				//			fix: `Review and comply with special provisions: ${refs.specialProvisions}.`,
+				//		});
+				//	}
+				//}
+			}
+		}
 	}
 
 	const noBolHasClass = bolResults.every((bol) => parseClasses(v(bol.extracted?.hazardClass)).length === 0);
@@ -701,17 +912,21 @@ function runAudit(bolResults, markerResults, cargoResults/*, exterierResults*/) 
 	// 2. PROPER SHIPPING NAME VERIFICATION (49 CFR 172.101 / 172.202)
 	// ─────────────────────────────────────────────
 
-	const noBolShippingNameOk = bolResults.every((bol) => v(bol.extracted?.properShippingNameValid) === false);
-	if (noBolShippingNameOk) {
-		addIssue({
-			source: 'BOL',
-			severity: 'MINOR',
-			cfr: '49 CFR 172.202(a)(1)',
-			check: 'Proper Shipping Name (172.101)',
-			message: 'Proper shipping name appears incorrect, abbreviated, or does not match the DOT Hazardous Materials Table (49 CFR 172.101) on all BOL documents.',
-			fix: 'Verify the exact DOT-authorized Proper Shipping Name from 49 CFR 172.101. Unauthorized abbreviations are not permitted.',
-		});
-	}
+	const noBolHasShippingName = bolResults.every((bol) => {
+        const psn = v(bol.extracted?.properShippingName);
+        return !psn || String(psn).trim() === '';
+    });
+
+    if (noBolHasShippingName) {
+        addIssue({
+            source: 'BOL',
+            severity: 'CRITICAL',
+            cfr: '49 CFR 172.202(a)(1)',
+            check: 'Proper Shipping Name',
+            message: 'Proper shipping name is missing from all BOL documents.',
+            fix: 'Add the exact DOT-authorized Proper Shipping Name from 49 CFR 172.101.',
+        });
+    }
 
 	// ─────────────────────────────────────────────
 	// 3. BOL × PLACARD CROSS-MATCH — set-based (49 CFR 172.504)
@@ -1089,14 +1304,14 @@ export async function createAudit(request, reply) {
 		return { id, url: data.publicUrl, mimetype: MIME_MAP[ext] ?? 'image/jpeg' };
 	});
  
-	let bolResults, markerResults, cargoResults, classifiedFiles;
+	let bolResults, markerResults, cargoResults, classifiedFiles, isGlobalHazmat;
 	try {
-		({ bolResults, markerResults, cargoResults, classifiedFiles } = await classifyAndAnalyzeAll(files));
+		({ bolResults, markerResults, cargoResults, classifiedFiles, isGlobalHazmat } = await classifyAndAnalyzeAll(files));
 	} catch (err) {
 		return reply.code(err.statusCode ?? 502).send({ error: err.message });
 	}
  
-	const audit = runAudit(bolResults, markerResults, cargoResults);
+	const audit = runAudit(bolResults, markerResults, cargoResults, isGlobalHazmat);
  
 	const auditResponse = { bol: bolResults, marker: markerResults, cargo: cargoResults, audit };
  
