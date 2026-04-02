@@ -1,0 +1,21 @@
+export const HAZMAT_PLACARD_RULES = {
+    '1.1': { placard: 'ANY_QUANTITY', unNumber: 'BULK_OR_LARGE_SINGLE' },
+    '1.2': { placard: 'ANY_QUANTITY', unNumber: 'BULK_OR_LARGE_SINGLE' },
+    '1.3': { placard: 'ANY_QUANTITY', unNumber: 'BULK_OR_LARGE_SINGLE' },
+    '2.3': { placard: 'ANY_QUANTITY', unNumber: 'ALWAYS_PIH' },
+    '4.3': { placard: 'ANY_QUANTITY', unNumber: 'BULK_OR_LARGE_SINGLE' },
+    '7':   { placard: 'ANY_QUANTITY', unNumber: 'BULK_OR_LARGE_SINGLE' },
+    '1.4': { placard: 'OVER_1001_LBS', unNumber: 'BULK_OR_LARGE_SINGLE' },
+    '1.5': { placard: 'OVER_1001_LBS', unNumber: 'BULK_OR_LARGE_SINGLE' },
+    '1.6': { placard: 'OVER_1001_LBS', unNumber: 'BULK_OR_LARGE_SINGLE' },
+    '2.1': { placard: 'OVER_1001_LBS', unNumber: 'BULK_OR_LARGE_SINGLE' },
+    '2.2': { placard: 'OVER_1001_LBS', unNumber: 'BULK_OR_LARGE_SINGLE' },
+    '3':   { placard: 'OVER_1001_LBS', unNumber: 'BULK_OR_LARGE_SINGLE' },
+    '4.1': { placard: 'OVER_1001_LBS', unNumber: 'BULK_OR_LARGE_SINGLE' },
+    '4.2': { placard: 'OVER_1001_LBS', unNumber: 'BULK_OR_LARGE_SINGLE' },
+    '5.1': { placard: 'OVER_1001_LBS', unNumber: 'BULK_OR_LARGE_SINGLE' },
+    '5.2': { placard: 'DEPENDS_ON_TYPE', unNumber: 'BULK_OR_LARGE_SINGLE' }, 
+    '6.1': { placard: 'DEPENDS_ON_PIH', unNumber: 'ALWAYS_PIH_OR_LARGE_SINGLE' },
+    '8':   { placard: 'OVER_1001_LBS', unNumber: 'BULK_OR_LARGE_SINGLE' },
+    '9':   { placard: 'NOT_REQUIRED_DOMESTIC', unNumber: 'BULK_ONLY' } 
+};

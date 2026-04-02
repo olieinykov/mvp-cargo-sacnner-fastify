@@ -5,6 +5,7 @@ import { count, desc } from 'drizzle-orm';
 import { createClient } from '@supabase/supabase-js';
 import { randomUUID } from 'node:crypto';
 import hazmatTable from '../../data/hazmat_data.json' with { type: 'json' };
+import { HAZMAT_PLACARD_RULES } from '../../data/placard_data.js';
 
 // ==========================
 // Supabase client
@@ -213,11 +214,13 @@ function buildSystemPrompt(imageType) {
 }
 
 // ==========================
-// Triage: Global Hazmat Check
+// Triage: Global BOL Helper
 // ==========================
 
-async function defineIsHazmat(bolFiles) {
-	if (!bolFiles || bolFiles.length === 0) return false;
+async function bolHelper(bolFiles) {
+	if (!bolFiles || bolFiles.length === 0) {
+		return { isHazmat: false, weights: [] };
+	}
 
 	const imageContents = bolFiles.map((file) => ({
 		type: 'image',
@@ -227,44 +230,59 @@ async function defineIsHazmat(bolFiles) {
 	const TRIAGE_SYSTEM_PROMPT =
 		'You are a document triage assistant for a Hazmat Load Audit System. ' +
 		'You will receive one or multiple images representing pages of a single Bill of Lading (BOL). ' +
-		'Your ONLY job is to determine if this shipment contains ANY hazardous materials (Hazmat) across ALL pages combined. ' +
-		'Look for UN/NA numbers (e.g., UN1203), hazard classes, or "X" / "RQ" marks in the HM column.\n\n' +
-		'Respond ONLY with a JSON object in this exact format:\n' +
-		'{\n' +
-		'  "isHazmat": true|false,\n' +
-		'  "reasoning": "Brief explanation of what you found and on which page"\n' +
-		'}';
+		'Your job is to determine if this shipment contains hazardous materials AND extract their total weights.\n\n' +
+		'INSTRUCTIONS:\n' +
+		'1. isHazmat: true if ANY hazmat is found (look for UN/NA numbers, hazard classes, or X/RQ in HM column).\n' +
+		'2. weights: An array with one entry per UN number. For each entry extract:\n' +
+		'   - unNumber: 4-digit UN/NA number as a string (digits only, no "UN" prefix), e.g. "1203".\n' +
+		'   - hazardClass: the hazard class printed on that same BOL line item, e.g. "3", "8", "2.1". null if not found.\n' +
+		'   - weight: total GROSS weight in LBS for that UN number. ' +
+		'ALWAYS prioritize the GROSS weight (e.g., "Gross Wgt Lbs", "Gross", or "Total Weight") over Net Weight. ' +
+		'If weight is in KG, multiply by 2.20462 to get LBS. ' +
+		'CORRELATION RULE: If the first page is a Master BOL and subsequent pages are Supplements, DO NOT duplicate the line items. Merge them into a single entry using the most precise weight available.\n\n' +
+		'CRITICAL: You MUST respond with ONLY a raw JSON object. ' +
+		'NO explanations, NO markdown, NO code fences, NO preamble. ' +
+		'Your entire response must start with { and end with }.\n\n' +
+		'Required format:\n' +
+		'{"isHazmat": true|false, "weights": [{"unNumber": "1203", "hazardClass": "3", "weight": 45000}]}';
 
 	try {
 		const response = await getClient().messages.create({
 			model: process.env.CLAUDE_VISION_MODEL,
-			max_tokens: 256, 
+			max_tokens: 512, 
 			system: TRIAGE_SYSTEM_PROMPT,
 			messages: [
 				{
 					role: 'user',
 					content: [
 						...imageContents,
-						{ type: 'text', text: 'Review all pages and determine if this is a hazmat shipment.' },
+						{ type: 'text', text: 'Review all pages, determine if hazmat is present, and extract the weights.' },
 					],
 				},
 			],
 		});
 
 		const textBlock = response.content.find((b) => b.type === 'text');
-		let clean = textBlock.text.replace(/```json\s*|```\s*/g, '').trim();
-		
-		if (!clean.startsWith('{')) {
-			const objMatch = clean.match(/(\{[\s\S]*\})/);
-			if (objMatch) clean = objMatch[1];
-		}
+		if (!textBlock) throw new Error('No text block in response');
 
-		const parsed = JSON.parse(clean);
-		return parsed.isHazmat === true;
+		let clean = textBlock.text
+			.replace(/```json\s*/gi, '')
+			.replace(/```\s*/g, '')
+			.trim();
+
+		const objMatch = clean.match(/\{[\s\S]*\}/);
+		if (!objMatch) throw new Error(`No JSON object found in response: ${clean.slice(0, 100)}`);
+
+		const parsed = JSON.parse(objMatch[0]);
+		
+		return {
+			isHazmat: parsed.isHazmat === true,
+			weights: Array.isArray(parsed.weights) ? parsed.weights : []
+		};
 
 	} catch (err) {
-		console.error('[defineIsHazmat] Error:', err.message);
-		return true; 
+		console.error('[bolHelper] Error:', err.message);
+		return { isHazmat: true, weights: [] }; 
 	}
 }
 
@@ -524,15 +542,15 @@ async function classifyAndAnalyzeAll(files) {
 		groups[imageType].push(file);
 	}
  
-	const [isGlobalHazmat, bolResults, markerResults, cargoResults] = await Promise.all([
-		groups.bolPhoto.length ? defineIsHazmat(groups.bolPhoto) : Promise.resolve(false),
+	const [helperResult, bolResults, markerResults, cargoResults] = await Promise.all([
+		groups.bolPhoto.length ? bolHelper(groups.bolPhoto) : Promise.resolve({ isHazmat: true, weights: [] }),
 		groups.bolPhoto.length    ? analyzeImageWithClaude(groups.bolPhoto,    'bolPhoto')    : Promise.resolve([]),
 		groups.markerPhoto.length ? analyzeImageWithClaude(groups.markerPhoto, 'markerPhoto') : Promise.resolve([]),
 		groups.cargoPhoto.length  ? analyzeImageWithClaude(groups.cargoPhoto,  'cargoPhoto')  : Promise.resolve([]),
 	]);
  
 	// Return classifiedFiles so createAudit can tag each image URL with its slot type
-	return { bolResults, markerResults, cargoResults, classifiedFiles, isGlobalHazmat };
+	return { bolResults, markerResults, cargoResults, classifiedFiles, isGlobalHazmat: helperResult.isHazmat, bolWeights: helperResult.weights };
 }
 
 const IMAGE_TYPE_TO_SLOT = {
@@ -595,27 +613,102 @@ const PLACARD_MAP = {
 	'9':   'Class 9 MISCELLANEOUS (black-and-white striped placard)',
 };
 
-function recommendPlacards(classes) {
+const LARGE_SINGLE_UN_THRESHOLD_LBS = 8820;
+
+/**
+ * Returns the total aggregated weight (lbs) for all UN entries that belong to
+ * a given hazard class, using the hazardClass field now returned by bolHelper.
+ */
+function getWeightForClass(targetClass, bolWeights) {
+	if (!bolWeights || bolWeights.length === 0) return 0;
+	const norm = (s) => (s ? String(s).trim().toLowerCase().replace(/^class\s+/, '') : null);
+	const target = norm(String(targetClass));
+	return bolWeights.reduce((sum, entry) => {
+		if (norm(String(entry.hazardClass ?? '')) === target) {
+			return sum + (Number(entry.weight) || 0);
+		}
+		return sum;
+	}, 0);
+}
+
+/**
+ * Determines whether an exterior placard is required for a given class based on weight rules.
+ * Returns true if the placard MUST be present.
+ */
+function isPlacardsRequired(hazardClass, bolWeights) {
+	const norm = (s) => (s ? String(s).trim().toLowerCase().replace(/^class\s+/, '') : null);
+	const cls = norm(String(hazardClass));
+ 
+	// Find rule — try exact match, then base class (e.g. '1.4' → '1')
+	const rule = HAZMAT_PLACARD_RULES[cls]
+		?? HAZMAT_PLACARD_RULES[cls?.split('.')[0]];
+ 
+	if (!rule) return false; // unknown class — don't require
+	if (rule.placard === 'NOT_REQUIRED_DOMESTIC') return false;
+	if (rule.placard === 'ANY_QUANTITY') return true;
+	if (rule.placard === 'OVER_1001_LBS') {
+		return getWeightForClass(cls, bolWeights) >= 1001;
+	}
+	// DEPENDS_ON_PIH / DEPENDS_ON_TYPE — treat as Table 2 for standard LTL
+	if (rule.placard === 'DEPENDS_ON_PIH' || rule.placard === 'DEPENDS_ON_TYPE') {
+		return getWeightForClass(cls, bolWeights) >= 1001;
+	}
+	return false;
+}
+
+/**
+ * Determines whether a UN number must appear on an exterior placard.
+ * Returns true only for PIH materials or a large single-UN shipment.
+ */
+function isUNNumberRequiredOnPlacard(unNumber, bolWeights) {
+	if (!bolWeights || bolWeights.length === 0) return false;
+	const cleanUN = String(unNumber).replace(/\D/g, '');
+	if (cleanUN.length !== 4) return false;
+ 
+	// Find this UN entry in bolWeights (now carries hazardClass directly)
+	const entry = bolWeights.find((e) => String(e.unNumber).replace(/\D/g, '') === cleanUN);
+	if (!entry) return false;
+ 
+	const cls  = String(entry.hazardClass ?? '').trim();
+	const rule = HAZMAT_PLACARD_RULES[cls] ?? HAZMAT_PLACARD_RULES[cls.split('.')[0]];
+ 
+	// PIH: Poison Gas (2.3) or Class 6.1 PIH — always needs UN# on exterior placard
+	if (rule?.unNumber === 'ALWAYS_PIH' || rule?.unNumber === 'ALWAYS_PIH_OR_LARGE_SINGLE') {
+		return true;
+	}
+ 
+	// BULK_OR_LARGE_SINGLE: only require UN# if this is the sole hazmat UN and weight > threshold
+	const allHazmatEntries = bolWeights.filter((e) => String(e.unNumber).replace(/\D/g, '').length === 4);
+	if (allHazmatEntries.length === 1 && (Number(entry.weight) || 0) > LARGE_SINGLE_UN_THRESHOLD_LBS) {
+		return true;
+	}
+ 
+	return false;
+}
+
+function recommendPlacards(classes, bolWeights) {
 	const recommendations = [];
 	for (const cls of classes) {
-		const label = PLACARD_MAP[cls];
-		if (label) recommendations.push(label);
+		if (isPlacardsRequired(cls, bolWeights)) {
+			const label = PLACARD_MAP[cls];
+			if (label) recommendations.push(label);
+		}
 	}
 	return recommendations;
 }
 
-function runAudit(bolResults, markerResults, cargoResults, isGlobalHazmat/*, exterierResults*/) {
+function runAudit(bolResults, markerResults, cargoResults, isGlobalHazmat, bolWeights/*, exterierResults*/) {
 	const issues = [];
-
+ 
 	// Convenience: get mainValue safely
 	const v = (field) => field?.mainValue ?? null;
-
+ 
 	// Normalise a single class string (trim, lowercase, strip "class " prefix)
 	const norm = (s) => (s ? String(s).trim().toLowerCase().replace(/^class\s+/, '') : null);
-
+ 
 	// Normalise a single UN/NA number: strip "UN"/"NA" prefix, keep only digits
 	const normUN = (s) => (s ? String(s).trim().replace(/^(un|na)/i, '').trim() : null);
-
+ 
 	// Parse a class field that may contain multiple values like "Class 8, Class 3" or "3 / 8".
 	// Returns an array of normalised non-empty class strings.
 	const parseClasses = (raw) => {
@@ -625,7 +718,7 @@ function runAudit(bolResults, markerResults, cargoResults, isGlobalHazmat/*, ext
 			.map((token) => norm(token.trim()))
 			.filter((token) => token && /^\d/.test(token));
 	};
-
+ 
 	// Parse a UN field that may contain multiple values like "UN1170, UN1993" or "1170/1993".
 	// Returns an array of normalised digit-only strings.
 	const parseUNs = (raw) => {
@@ -635,7 +728,7 @@ function runAudit(bolResults, markerResults, cargoResults, isGlobalHazmat/*, ext
 			.map((token) => normUN(token.trim()))
 			.filter((token) => token && /^\d{4}$/.test(token));
 	};
-
+ 
 	// Helper to check if a specific subclass matches a base class on a placard/label
     const isClassMatch = (cls1, cls2) => {
         if (cls1 === cls2) return true;
@@ -647,7 +740,7 @@ function runAudit(bolResults, markerResults, cargoResults, isGlobalHazmat/*, ext
         
         return false;
     };
-
+ 
 	// Helper to add an issue only if not already present (same cfr + check + message)
 	const addIssue = (issue) => {
 		const dup = issues.some(
@@ -655,12 +748,39 @@ function runAudit(bolResults, markerResults, cargoResults, isGlobalHazmat/*, ext
 		);
 		if (!dup) issues.push(issue);
 	};
-
+ 
+	// ─────────────────────────────────────────────
+	// 0. GLOBAL HAZMAT SPLIT
+	// ─────────────────────────────────────────────
+ 
+	if (!isGlobalHazmat) {
+		// ── FALSE PLACARDING CHECK (49 CFR 171.2(k)) ──────────────────────────
+		// Shipment is declared non-hazmat. If the AI found hazmat placards on the
+		// trailer or hazmat diamond labels on cargo, that is a critical violation.
+		const hasPlacardOnTruck = markerResults.some((m) => {
+			const cls = v(m.extracted?.hazardClass);
+			return cls !== null && String(cls).trim() !== '';
+		});
+		const hasDiamondOnCargo = cargoResults.some((c) => {
+			const cls = v(c.extracted?.hazardClass);
+			return cls !== null && String(cls).trim() !== '';
+		});
+		if (hasPlacardOnTruck || hasDiamondOnCargo) {
+			addIssue({
+				source:   'CROSS',
+				severity: 'CRITICAL',
+				cfr:      '49 CFR 171.2(k)',
+				check:    'False Placarding',
+				message:  'Shipment is declared as non-hazardous on the BOL, but hazmat placards or hazard class labels were detected on the vehicle or cargo. Displaying hazmat placards on a non-hazmat shipment is a federal violation.',
+				fix:      'If this shipment IS hazardous, update the BOL accordingly. If it is not, remove all hazmat placards and labels before departure.',
+			});
+		}
+	} else {
 	// ─────────────────────────────────────────────
 	// 1. BOL FIELD VALIDATION — "at least one BOL satisfies" logic (49 CFR 172.200–204)
 	// An issue is raised only if NO BOL image satisfies the condition.
 	// ─────────────────────────────────────────────
-
+ 
 	const noBolHasUN = bolResults.every((bol) => parseUNs(v(bol.extracted?.unNumber)).length === 0);
 	if (noBolHasUN) {
 		addIssue({
@@ -672,24 +792,24 @@ function runAudit(bolResults, markerResults, cargoResults, isGlobalHazmat/*, ext
 			fix: 'Add the UN/NA number (e.g. UN1170) to the hazmat entry on the BOL.',
 		});
 	}
-
-	if (isGlobalHazmat) {
+ 
+	{
 		for (const bol of bolResults) {
 			const bolExt = bol.extracted ?? {};
 			const bolUNs = parseUNs(v(bolExt.unNumber));
-
+ 
 			for (const unNum of bolUNs) {
 				const cleanUnNum = String(unNum).replace(/\D/g, '');
-
+ 
 				if (cleanUnNum.length !== 4) continue;
-
+ 
 				const entry = hazmatTable?.[`UN${cleanUnNum}`];
 				if (!entry) continue;
-
+ 
 				const expected = entry.expectedData ?? {};
 				const errors   = entry.errors       ?? {};
 				const refs     = entry.references   ?? {};
-
+ 
 				// ── 1. Hazard Class ──────────────────────────────────────────
 				const bolClassArr = parseClasses(v(bolExt.hazardClass));
 				if (
@@ -707,7 +827,7 @@ function runAudit(bolResults, markerResults, cargoResults, isGlobalHazmat/*, ext
 						fix: `Correct the hazard class to "${expected.hazardClass}" per the DOT Hazardous Materials Table.`,
 					});
 				}
-
+ 
 				// ── 2. Packing Group ─────────────────────────────────────────
 				const bolPG        = v(bolExt.packingGroup);
 				const normalizedPG = bolPG ? String(bolPG).trim().toUpperCase() : null;
@@ -728,11 +848,11 @@ function runAudit(bolResults, markerResults, cargoResults, isGlobalHazmat/*, ext
 						fix: `Correct the packing group to "${expected.packingGroup}" per the DOT Hazardous Materials Table.`,
 					});
 				}
-
+ 
 				// ── 3. Proper Shipping Name ───────────────────────────────────
 				const bolPSN      = v(bolExt.properShippingName);
 				const expectedPSN = expected.properShippingName;
-
+ 
 				if (
 					expectedPSN != null &&
 					bolPSN      != null &&
@@ -750,12 +870,12 @@ function runAudit(bolResults, markerResults, cargoResults, isGlobalHazmat/*, ext
 							.replace(/\s+/g, ' ')
 							.trim();
 					};
-
+ 
 					const bolNorm = normPSN(bolPSN);
 					const expNorm = normPSN(expectedPSN);
-
+ 
 					const isMatch = bolNorm === expNorm || bolNorm.startsWith(expNorm);
-
+ 
 					if (!isMatch) {
 						addIssue({
 							source:   'BOL',
@@ -767,7 +887,7 @@ function runAudit(bolResults, markerResults, cargoResults, isGlobalHazmat/*, ext
 						});
 					}
 				}
-
+ 
 				// ── 4. Label Codes ────────────────────────────────────────────
 				if (expected.labelCodes != null) {
 					const requiredLabels = parseClasses(String(expected.labelCodes));
@@ -787,7 +907,7 @@ function runAudit(bolResults, markerResults, cargoResults, isGlobalHazmat/*, ext
 						});
 					}
 				}
-
+ 
 				// ── 5. Packaging references (informational MINOR) ─────────────
 				//if (refs.packagingNonBulk || refs.packagingBulk || refs.packagingExceptions) {
 				//	const parts = [
@@ -795,7 +915,7 @@ function runAudit(bolResults, markerResults, cargoResults, isGlobalHazmat/*, ext
 				//		refs.packagingNonBulk    && `Non-bulk § ${refs.packagingNonBulk}`,
 				//		refs.packagingBulk       && `Bulk § ${refs.packagingBulk}`,
 				//	].filter(Boolean).join(', ');
-
+ 
 				//	const hasPackagingViolation = v(bolExt.packagingViolation) === true;
 				//	if (hasPackagingViolation) {
 				//		addIssue({
@@ -809,7 +929,7 @@ function runAudit(bolResults, markerResults, cargoResults, isGlobalHazmat/*, ext
 				//		});
 				//	}
 				//}
-
+ 
 				//if (refs.specialProvisions) {
 				//	const hasSpecialViolation = v(bolExt.specialProvisionsViolation) === true;
 				//	if (hasSpecialViolation) {
@@ -827,7 +947,7 @@ function runAudit(bolResults, markerResults, cargoResults, isGlobalHazmat/*, ext
 			}
 		}
 	}
-
+ 
 	const noBolHasClass = bolResults.every((bol) => parseClasses(v(bol.extracted?.hazardClass)).length === 0);
 	if (noBolHasClass) {
 		addIssue({
@@ -839,7 +959,7 @@ function runAudit(bolResults, markerResults, cargoResults, isGlobalHazmat/*, ext
 			fix: 'Add the numeric hazard class (e.g. "3", "8", "5.2") to the BOL entry.',
 		});
 	}
-
+ 
 	const noBolHasHM = bolResults.every((bol) => !v(bol.extracted?.hmColumnMarked));
 	if (noBolHasHM) {
 		addIssue({
@@ -851,7 +971,7 @@ function runAudit(bolResults, markerResults, cargoResults, isGlobalHazmat/*, ext
 			fix: 'Mark "X" in the HM column next to each hazmat entry on the BOL.',
 		});
 	}
-
+ 
 	const noBolHasPhone = bolResults.every((bol) => !v(bol.extracted?.emergencyPhone));
 	if (noBolHasPhone) {
 		addIssue({
@@ -863,7 +983,7 @@ function runAudit(bolResults, markerResults, cargoResults, isGlobalHazmat/*, ext
 			fix: 'Add a monitored 24-hour emergency phone number (e.g. CHEMTREC 800-424-9300).',
 		});
 	}
-
+ 
 	const noBolHasPG = bolResults.every((bol) => {
 		const bolExt      = bol.extracted ?? {};
 		const bolClsArr   = parseClasses(v(bolExt.hazardClass));
@@ -883,7 +1003,7 @@ function runAudit(bolResults, markerResults, cargoResults, isGlobalHazmat/*, ext
 			fix: 'Add the required packing group designation to the BOL hazmat entry.',
 		});
 	}
-
+ 
 	const noBolHasCert = bolResults.every((bol) => !v(bol.extracted?.shipperCertificationPresent));
 	if (noBolHasCert) {
 		addIssue({
@@ -895,7 +1015,7 @@ function runAudit(bolResults, markerResults, cargoResults, isGlobalHazmat/*, ext
 			fix: 'Have the shipper sign the certification statement on the BOL.',
 		});
 	}
-
+ 
 	const noBolSequenceOk = bolResults.every((bol) => v(bol.extracted?.entrySequenceCompliant) === false);
 	if (noBolSequenceOk) {
 		addIssue({
@@ -907,16 +1027,16 @@ function runAudit(bolResults, markerResults, cargoResults, isGlobalHazmat/*, ext
 			fix: 'Reorder the BOL hazmat entry to: Proper Shipping Name, Hazard Class, UN/NA Number, Packing Group.',
 		});
 	}
-
+ 
 	// ─────────────────────────────────────────────
 	// 2. PROPER SHIPPING NAME VERIFICATION (49 CFR 172.101 / 172.202)
 	// ─────────────────────────────────────────────
-
+ 
 	const noBolHasShippingName = bolResults.every((bol) => {
         const psn = v(bol.extracted?.properShippingName);
         return !psn || String(psn).trim() === '';
     });
-
+ 
     if (noBolHasShippingName) {
         addIssue({
             source: 'BOL',
@@ -927,80 +1047,91 @@ function runAudit(bolResults, markerResults, cargoResults, isGlobalHazmat/*, ext
             fix: 'Add the exact DOT-authorized Proper Shipping Name from 49 CFR 172.101.',
         });
     }
-
+ 
+	} // end isGlobalHazmat — BOL field validation
+ 
 	// ─────────────────────────────────────────────
-	// 3. BOL × PLACARD CROSS-MATCH — set-based (49 CFR 172.504)
-	// Each UN/Class from BOL must find at least one match across ALL placards,
-	// and each UN/Class from placards must find at least one match across ALL BOLs.
+	// 3. BOL × PLACARD CROSS-MATCH — weight-aware (49 CFR 172.504 / 172.332)
+	// Placards are only REQUIRED when the weight/class rules demand them.
+	// UN numbers on exterior placards are only required for PIH or large single-UN loads.
 	// ─────────────────────────────────────────────
-
+ 
 	const bolClasses     = [...new Set(bolResults    .flatMap((b) => parseClasses(v(b.extracted?.hazardClass))))];
 	const bolUNs         = [...new Set(bolResults    .flatMap((b) => parseUNs(v(b.extracted?.unNumber))))];
 	const placardClasses = [...new Set(markerResults .flatMap((m) => parseClasses(v(m.extracted?.hazardClass))))];
 	const placardUNs     = [...new Set(markerResults .flatMap((m) => parseUNs(v(m.extracted?.unNumber))))];
-
-	// BOL classes that have no matching placard class
-    for (const bc of bolClasses) {
-        if (placardClasses.length > 0 && !placardClasses.some((pc) => isClassMatch(bc, pc))) {
-            addIssue({
-                source: 'CROSS',
-                severity: 'CRITICAL',
-                cfr: '49 CFR 172.504(a)',
-                check: 'BOL-Placard Class Match',
-                message: `BOL declares Class ${bc} but no matching placard was found (placard classes: ${placardClasses.join(', ')}).`,
-                fix: `Ensure at least one placard displaying Class ${bc} (or its base class) is present on all 4 sides of the trailer.`,
-            });
-        }
-    }
-
-    // Placard classes that have no matching BOL class
-    for (const pc of placardClasses) {
-        if (bolClasses.length > 0 && !bolClasses.some((bc) => isClassMatch(bc, pc))) {
-            addIssue({
-                source: 'CROSS',
-                severity: 'CRITICAL',
-                cfr: '49 CFR 172.504(a)',
-                check: 'BOL-Placard Class Match',
-                message: `Placard shows Class ${pc} but this class is not declared on any BOL (BOL classes: ${bolClasses.join(', ')}).`,
-                fix: `Remove or replace the incorrect Class ${pc} placard, or update the BOL to include this class.`,
-            });
-        }
-    }
-
-	// BOL UN numbers that have no matching placard UN
-	for (const bu of bolUNs) {
-		if (placardUNs.length > 0 && !placardUNs.includes(bu)) {
-			addIssue({
-				source: 'CROSS',
-				severity: 'CRITICAL',
-				cfr: '49 CFR 172.332',
-				check: 'BOL-Placard UN Match',
-				message: `UN${bu} is listed on BOL but was not found on any placard (placard UNs: ${placardUNs.map((u) => 'UN' + u).join(', ')}).`,
-				fix: `Ensure a placard displaying UN${bu} is present on all 4 sides of the trailer.`,
-			});
+ 
+	if (isGlobalHazmat) {
+		// BOL class requires a placard → check if one is present on the truck
+		for (const bc of bolClasses) {
+			const required = isPlacardsRequired(bc, bolWeights);
+			if (!required) continue; // weight threshold not met — placard not mandatory
+ 
+			if (placardClasses.length > 0 && !placardClasses.some((pc) => isClassMatch(bc, pc))) {
+				addIssue({
+					source: 'CROSS',
+					severity: 'CRITICAL',
+					cfr: '49 CFR 172.504(a)',
+					check: 'BOL-Placard Class Match',
+					message: `BOL declares Class ${bc} and the weight threshold requires a placard, but no matching placard was found on the vehicle (placard classes: ${placardClasses.join(', ') || 'none'}).`,
+					fix: `Affix a Class ${bc} placard on all 4 sides of the trailer before departure.`,
+				});
+			}
+		}
+ 
+		// Placard found on truck but not declared on BOL → false placarding
+		for (const pc of placardClasses) {
+			if (bolClasses.length > 0 && !bolClasses.some((bc) => isClassMatch(bc, pc))) {
+				addIssue({
+					source: 'CROSS',
+					severity: 'CRITICAL',
+					cfr: '49 CFR 172.504(a)',
+					check: 'BOL-Placard Class Match',
+					message: `Placard on vehicle shows Class ${pc} but this class is not declared on any BOL (BOL classes: ${bolClasses.join(', ')}).`,
+					fix: `Remove or replace the incorrect Class ${pc} placard, or update the BOL to include this class.`,
+				});
+			}
+		}
+ 
+		// ── UN number on exterior placard (49 CFR 172.332) ─────────────────
+		// Required only for PIH or a single-UN large load (> 8,820 lbs).
+		for (const bu of bolUNs) {
+			if (!isUNNumberRequiredOnPlacard(bu, bolWeights)) continue; // not required
+ 
+			if (placardUNs.length > 0 && !placardUNs.includes(bu)) {
+				addIssue({
+					source: 'CROSS',
+					severity: 'CRITICAL',
+					cfr: '49 CFR 172.332',
+					check: 'BOL-Placard UN Match',
+					message: `UN${bu} requires a UN number on the exterior placard (PIH material or large single-UN load) but was not found on any placard (placard UNs: ${placardUNs.map((u) => 'UN' + u).join(', ') || 'none'}).`,
+					fix: `Ensure a placard panel displaying UN${bu} is present on all 4 sides of the trailer.`,
+				});
+			}
+		}
+ 
+		// Placard has a UN number that doesn't appear on the BOL — always an error
+		for (const pu of placardUNs) {
+			if (bolUNs.length > 0 && !bolUNs.includes(pu)) {
+				addIssue({
+					source: 'CROSS',
+					severity: 'CRITICAL',
+					cfr: '49 CFR 172.332',
+					check: 'BOL-Placard UN Match',
+					message: `UN${pu} is shown on a placard but was not found on any BOL (BOL UNs: ${bolUNs.map((u) => 'UN' + u).join(', ')}).`,
+					fix: `Remove or replace the incorrect placard, or update the BOL to include UN${pu}.`,
+				});
+			}
 		}
 	}
-	// Placard UN numbers that have no matching BOL UN
-	for (const pu of placardUNs) {
-		if (bolUNs.length > 0 && !bolUNs.includes(pu)) {
-			addIssue({
-				source: 'CROSS',
-				severity: 'CRITICAL',
-				cfr: '49 CFR 172.332',
-				check: 'BOL-Placard UN Match',
-				message: `UN${pu} is shown on a placard but was not found on any BOL (BOL UNs: ${bolUNs.map((u) => 'UN' + u).join(', ')}).`,
-				fix: `Remove or replace the incorrect placard, or update the BOL to include UN${pu}.`,
-			});
-		}
-	}
-
+ 
 	// ─────────────────────────────────────────────
 	// 4. BOL × CARGO CROSS-MATCH — set-based (49 CFR 172.301 / 172.400)
 	// ─────────────────────────────────────────────
-
+ 
 	const cargoClasses = [...new Set(cargoResults.flatMap((c) => parseClasses(v(c.extracted?.hazardClass))))];
 	const cargoUNs     = [...new Set(cargoResults.flatMap((c) => parseUNs(v(c.extracted?.unNumber))))];
-
+ 
 	// BOL classes that have no matching cargo class
     for (const bc of bolClasses) {
         if (cargoClasses.length > 0 && !cargoClasses.some((cc) => isClassMatch(bc, cc))) {
@@ -1014,7 +1145,7 @@ function runAudit(bolResults, markerResults, cargoResults, isGlobalHazmat/*, ext
             });
         }
     }
-
+ 
     // Cargo classes that have no matching BOL class
     for (const cc of cargoClasses) {
         if (bolClasses.length > 0 && !bolClasses.some((bc) => isClassMatch(bc, cc))) {
@@ -1028,7 +1159,7 @@ function runAudit(bolResults, markerResults, cargoResults, isGlobalHazmat/*, ext
             });
         }
     }
-
+ 
 	// BOL UN numbers that have no matching cargo UN
 	for (const bu of bolUNs) {
 		if (cargoUNs.length > 0 && !cargoUNs.includes(bu)) {
@@ -1055,7 +1186,7 @@ function runAudit(bolResults, markerResults, cargoResults, isGlobalHazmat/*, ext
 			});
 		}
 	}
-
+ 
 	// Package labels check — issue only if NO cargo image has labels present
 	const noCargoHasLabels = cargoResults.every((cargo) => !v(cargo.extracted?.packageLabelsPresent));
 	if (noCargoHasLabels) {
@@ -1068,12 +1199,12 @@ function runAudit(bolResults, markerResults, cargoResults, isGlobalHazmat/*, ext
 			fix: 'Affix the correct hazard class label(s) to each package as required by 49 CFR 172.400.',
 		});
 	}
-
+ 
 	// ─────────────────────────────────────────────
 	// 5. COMPATIBILITY CHECK (49 CFR 177.848)
 	// Collect all unique classes across all slots
 	// ─────────────────────────────────────────────
-
+ 
 	const allClasses = [
 		...new Set([
 			...bolResults.flatMap((b) => parseClasses(v(b.extracted?.hazardClass))),
@@ -1081,7 +1212,7 @@ function runAudit(bolResults, markerResults, cargoResults, isGlobalHazmat/*, ext
 			...cargoResults.flatMap((c) => parseClasses(v(c.extracted?.hazardClass))),
 		]),
 	];
-
+ 
 	if (allClasses.length >= 2) {
 		for (let i = 0; i < allClasses.length; i++) {
 			for (let j = i + 1; j < allClasses.length; j++) {
@@ -1098,11 +1229,11 @@ function runAudit(bolResults, markerResults, cargoResults, isGlobalHazmat/*, ext
 			}
 		}
 	}
-
+ 
 	// ─────────────────────────────────────────────
 	// 6. PLACARD CONDITION CHECKS — "at least one placard satisfies" logic
 	// ─────────────────────────────────────────────
-
+ 
 	const allPlacardsDamaged = markerResults.every((marker) => {
 		const cond = v(marker.extracted?.placardCondition);
 		return cond && cond !== 'unknown' && cond === 'damaged';
@@ -1132,7 +1263,7 @@ function runAudit(bolResults, markerResults, cargoResults, isGlobalHazmat/*, ext
 			});
 		}
 	}
-
+ 
 	const noPlacardFourSided = markerResults.every((marker) => !v(marker.extracted?.fourSidedPlacementVerified));
 	if (noPlacardFourSided && markerResults.length > 0) {
 		addIssue({
@@ -1144,7 +1275,7 @@ function runAudit(bolResults, markerResults, cargoResults, isGlobalHazmat/*, ext
 			fix: 'Submit photos of all 4 sides of the trailer to confirm placard placement.',
 		});
 	}
-
+ 
 	const noPlacardCorrectOrientation = markerResults.every((marker) => v(marker.extracted?.correctOrientation) === false);
 	if (noPlacardCorrectOrientation && markerResults.length > 0) {
 		addIssue({
@@ -1156,11 +1287,11 @@ function runAudit(bolResults, markerResults, cargoResults, isGlobalHazmat/*, ext
 			fix: 'Re-affix the placard(s) in the correct point-up diamond orientation.',
 		});
 	}
-
+ 
 	// ─────────────────────────────────────────────
 	// 7. CARGO / LOAD SECUREMENT — "at least one cargo satisfies" logic
 	// ─────────────────────────────────────────────
-
+ 
 	const noCargoSecured = cargoResults.every((cargo) => v(cargo.extracted?.loadSecured) === false);
 	if (noCargoSecured && cargoResults.length > 0) {
 		addIssue({
@@ -1172,7 +1303,7 @@ function runAudit(bolResults, markerResults, cargoResults, isGlobalHazmat/*, ext
 			fix: 'Secure all cargo with appropriate tie-downs, straps, or blocking before departure.',
 		});
 	}
-
+ 
 	const noCargoNoShifting = cargoResults.every((cargo) => v(cargo.extracted?.noShiftingHazards) === false);
 	if (noCargoNoShifting && cargoResults.length > 0) {
 		addIssue({
@@ -1184,11 +1315,11 @@ function runAudit(bolResults, markerResults, cargoResults, isGlobalHazmat/*, ext
 			fix: 'Add additional tie-downs or bracing to prevent cargo movement in transit.',
 		});
 	}
-
+ 
 	// ─────────────────────────────────────────────
 	// 8. OTHER NOTES from each slot
 	// ─────────────────────────────────────────────
-
+ 
 	const pushNote = (source, note) => {
 		if (!note || typeof note !== 'object' || Array.isArray(note)) return;
 		const check   = typeof note.sign_name === 'string' ? note.sign_name.trim() : null;
@@ -1196,28 +1327,28 @@ function runAudit(bolResults, markerResults, cargoResults, isGlobalHazmat/*, ext
 		if (!check || !message) return;
 		addIssue({ source, severity: 'WARNING', cfr: null, check, message, fix: null });
 	};
-
+ 
 	for (const bol    of bolResults)    for (const note of (bol.extracted?.otherNotes    ?? [])) pushNote('BOL',     note);
 	for (const marker of markerResults) for (const note of (marker.extracted?.otherNotes ?? [])) pushNote('PLACARD', note);
 	for (const cargo  of cargoResults)  for (const note of (cargo.extracted?.otherNotes  ?? [])) pushNote('CARGO',   note);
-
+ 
 	// ─────────────────────────────────────────────
 	// 9. SCORING & SUMMARY
 	// ─────────────────────────────────────────────
-
+ 
 	const countBySeverity = (sev) => issues.filter((i) => i.severity === sev).length;
 	const criticalCount = countBySeverity('CRITICAL');
 	const majorCount    = countBySeverity('MAJOR');
 	const minorCount    = countBySeverity('MINOR');
 	const warningCount  = countBySeverity('WARNING');
-
+ 
 	const score    = Math.max(0, 100 - criticalCount * 20 - majorCount * 10 - minorCount * 3 - warningCount * 1);
 	const isPassed = criticalCount === 0 && majorCount === 0;
-
+ 
 	// ─────────────────────────────────────────────
 	// 10. PLACARD RECOMMENDATIONS
 	// ─────────────────────────────────────────────
-
+ 
 	const allClassesForRec = [
 		...new Set([
 			...bolResults.flatMap((b) => parseClasses(v(b.extracted?.hazardClass))),
@@ -1225,8 +1356,8 @@ function runAudit(bolResults, markerResults, cargoResults, isGlobalHazmat/*, ext
 			...cargoResults.flatMap((c) => parseClasses(v(c.extracted?.hazardClass))),
 		]),
 	];
-	const placardRecommendations = recommendPlacards(allClassesForRec);
-
+	const placardRecommendations = recommendPlacards(allClassesForRec, bolWeights);
+ 
 	return {
 		is_passed: isPassed,
 		score,
@@ -1304,14 +1435,29 @@ export async function createAudit(request, reply) {
 		return { id, url: data.publicUrl, mimetype: MIME_MAP[ext] ?? 'image/jpeg' };
 	});
  
-	let bolResults, markerResults, cargoResults, classifiedFiles, isGlobalHazmat;
+	let bolResults, markerResults, cargoResults, classifiedFiles, isGlobalHazmat, bolWeights;
 	try {
-		({ bolResults, markerResults, cargoResults, classifiedFiles, isGlobalHazmat } = await classifyAndAnalyzeAll(files));
+		({ bolResults, markerResults, cargoResults, classifiedFiles, isGlobalHazmat, bolWeights } = await classifyAndAnalyzeAll(files));
 	} catch (err) {
 		return reply.code(err.statusCode ?? 502).send({ error: err.message });
 	}
- 
-	const audit = runAudit(bolResults, markerResults, cargoResults, isGlobalHazmat);
+
+	if (bolWeights && bolWeights.length > 0) {
+		const formattedWeightsStr = bolWeights
+			.map(w => `UN: ${String(w.unNumber).replace(/\D/g, '')} | Weight: ${w.weight} lbs;`)
+			.join('\n');
+
+		bolResults.forEach(bol => {
+			if (bol.extracted) {
+				bol.extracted.totalWeights = {
+					mainValue: formattedWeightsStr,
+					meaning: "Total aggregate gross weights calculated across all BOL pages"
+				};
+			}
+		});
+	}
+
+	const audit = runAudit(bolResults, markerResults, cargoResults, isGlobalHazmat, bolWeights);
  
 	const auditResponse = { bol: bolResults, marker: markerResults, cargo: cargoResults, audit };
  
