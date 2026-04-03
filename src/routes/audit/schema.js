@@ -7,6 +7,7 @@ export const getAuditsSchema = {
 		properties: {
 			page:  { type: 'integer', minimum: 1, default: 1 },
 			limit: { type: 'integer', minimum: 1, maximum: 100, default: 20 },
+			auditorId: { type: 'string' },
 		},
 	},
 	response: {
@@ -132,6 +133,10 @@ export const createAuditSchema = {
 				maxItems: 15,
 				items: { type: 'string' },
 				description: 'Supabase storage keys returned by POST /audit/upload',
+			},
+			auditorId: {
+				type: 'string',
+				description: 'Auditor ID',
 			},
 		},
 	},

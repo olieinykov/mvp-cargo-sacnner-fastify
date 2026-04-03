@@ -1,5 +1,6 @@
 import Fastify from 'fastify';
 import auditRoutes from './routes/audit/index.js';
+import authRoutes from './routes/auth/index.js';
 import swagger from '@fastify/swagger';
 import swaggerUi from '@fastify/swagger-ui';
 import { config } from './config/index.js';
@@ -21,6 +22,7 @@ await fastify.register(swagger, {
 await fastify.register(swaggerUi, { routePrefix: '/docs' });
 
 fastify.register(auditRoutes, { prefix: 'api/v1/audit' });
+fastify.register(authRoutes, { prefix: 'api/v1/auth' });
 
 try {
 	await fastify.listen({

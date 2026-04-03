@@ -1,7 +1,7 @@
 import { requireAnthropic } from '../../lib/cloudeClient.js';
 import { db } from '../../db/connection.js';
 import { audits } from '../../db/schema.js';
-import { count, desc } from 'drizzle-orm';
+import { count, desc, eq } from 'drizzle-orm';
 import { createClient } from '@supabase/supabase-js';
 import { randomUUID } from 'node:crypto';
 import hazmatTable from '../../data/hazmat_data.json' with { type: 'json' };
@@ -1419,7 +1419,7 @@ export async function uploadAuditImages(request, reply) {
 // ==========================
 
 export async function createAudit(request, reply) {
-	const { imageIds } = request.body;
+	const { imageIds, auditorId } = request.body;
  
 	if (!Array.isArray(imageIds) || imageIds.length === 0) {
 		return reply.code(400).send({ error: 'Field "imageIds" must be a non-empty array of storage IDs.' });
@@ -1474,6 +1474,7 @@ export async function createAudit(request, reply) {
 			is_passed:   String(audit.is_passed),
 			score:       String(audit.score),
 			auditImages,
+			auditorId
 		}).returning({ id: audits.id });
 		savedId = saved.id;
 	} catch (err) {
@@ -1488,7 +1489,7 @@ export async function createAudit(request, reply) {
 // ==========================
  
 export async function getAudits(request, reply) {
-	const { page = 1, limit = 20 } = request.query;
+	const { page = 1, limit = 20, auditorId } = request.query;
 	const offset = (page - 1) * limit;
  
 	try {
@@ -1503,10 +1504,11 @@ export async function getAudits(request, reply) {
 					auditImages: audits.auditImages,
 				})
 				.from(audits)
+				.where(eq(audits.auditorId, auditorId))
 				.orderBy(desc(audits.created_at))
 				.limit(limit)
 				.offset(offset),
-			db.select({ total: count() }).from(audits),
+			db.select({ total: count() }).from(audits).where(eq(audits.auditorId, auditorId)),
 		]);
  
 		const totalPages = Math.ceil(total / limit);
