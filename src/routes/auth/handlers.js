@@ -317,7 +317,7 @@ export async function createInvitation(request, reply) {
 		.returning();
 
 	// Send invite email via Supabase
-	const appUrl     = process.env.APP_URL ?? 'http://localhost:3000';
+	const appUrl     = process.env.APP_URL ?? 'http://localhost:5173';
 	const inviteLink = `${appUrl}/invite?token=${inviteToken}`;
 
 	const { error: emailError } = await supabase.auth.admin.inviteUserByEmail(email, {
