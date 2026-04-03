@@ -1,4 +1,4 @@
-import { pgTable, uuid, jsonb, timestamp, text, pgEnum } from 'drizzle-orm/pg-core';
+import { pgTable, uuid, jsonb, timestamp, text, pgEnum, boolean } from 'drizzle-orm/pg-core';
 
 export const memberRoleEnum = pgEnum('member_role', ['admin', 'user']);
 export const inviteStatusEnum = pgEnum('invite_status', ['pending', 'accepted', 'expired']);
@@ -46,4 +46,5 @@ export const users = pgTable('users', {
   email: text('email').notNull().unique(),
   role: memberRoleEnum('role').notNull().default('user'),
   registrationData: timestamp('registration_data').defaultNow().notNull(),
+  isEmailConfirmed: boolean('is_email_confirmed').notNull()
 });

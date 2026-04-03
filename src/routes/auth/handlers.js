@@ -25,94 +25,103 @@ const getSupabase = () => {
 };
 
 // ==========================
-// POST /auth/signUp
+// POST /auth/signUp-invite
 // ==========================
 
-export async function signUp(request, reply) {
-	const { email, password, firstName, lastName, inviteToken, company } = request.body;
+export async function signUpByInvite(request, reply) {
+	const { email, password, firstName, lastName, inviteToken } = request.body;
+
+	if (!inviteToken) {
+		return reply.code(400).send({ error: 'Invite token is required.' });
+	}
 
 	const supabase = getSupabase();
 
-	// ── PATH A: invited user ───────────────────────────────────────────────────
-	if (inviteToken) {
-		const [found] = await db
-			.select()
-			.from(invitations)
-			.where(
-				and(
-					eq(invitations.token, inviteToken),
-					eq(invitations.status, 'pending'),
-				),
-			)
-			.limit(1);
+	const [found] = await db
+		.select()
+		.from(invitations)
+		.where(
+			and(
+				eq(invitations.token, inviteToken),
+				eq(invitations.status, 'pending'),
+			),
+		)
+		.limit(1);
 
-		if (!found) {
-			return reply.code(400).send({ error: 'Invalid or expired invitation token.' });
-		}
+	if (!found) {
+		return reply.code(400).send({ error: 'Invalid or expired invitation token.' });
+	}
 
-		if (new Date(found.expiresAt) < new Date()) {
-			await db
+	if (new Date(found.expiresAt) < new Date()) {
+		await db
+			.update(invitations)
+			.set({ status: 'expired' })
+			.where(eq(invitations.id, found.id));
+
+		return reply.code(400).send({ error: 'Invitation token has expired.' });
+	}
+
+	if (found.email.toLowerCase() !== email.toLowerCase()) {
+		return reply.code(400).send({ error: 'Email does not match the invitation.' });
+	}
+
+	// Create Supabase Auth user
+	const { data: authData, error: authError } = await supabase.auth.admin.createUser({
+		email,
+		password,
+		email_confirm: true,
+	});
+
+	if (authError) {
+		return reply.code(authError.status ?? 400).send({ error: authError.message });
+	}
+
+	const authUserId = authData.user.id;
+
+	try {
+		const newUser = await db.transaction(async (tx) => {
+			const [user] = await tx
+				.insert(users)
+				.values({
+					id:        authUserId,
+					companyId: found.companyId,
+					firstName,
+					lastName,
+					email:     email.toLowerCase(),
+					role:      found.role,
+				})
+				.returning();
+
+			await tx
 				.update(invitations)
-				.set({ status: 'expired' })
+				.set({ status: 'accepted' })
 				.where(eq(invitations.id, found.id));
 
-			return reply.code(400).send({ error: 'Invitation token has expired.' });
-		}
-
-		if (found.email.toLowerCase() !== email.toLowerCase()) {
-			return reply.code(400).send({ error: 'Email does not match the invitation.' });
-		}
-
-		// Create Supabase Auth user
-		const { data: authData, error: authError } = await supabase.auth.admin.createUser({
-			email,
-			password,
-			email_confirm: true,
+			return user;
 		});
 
-		if (authError) {
-			return reply.code(authError.status ?? 400).send({ error: authError.message });
-		}
-
-		const authUserId = authData.user.id;
-
-		try {
-			const newUser = await db.transaction(async (tx) => {
-				const [user] = await tx
-					.insert(users)
-					.values({
-						id:        authUserId,
-						companyId: found.companyId,
-						firstName,
-						lastName,
-						email:     email.toLowerCase(),
-						role:      found.role,
-					})
-					.returning();
-
-				await tx
-					.update(invitations)
-					.set({ status: 'accepted' })
-					.where(eq(invitations.id, found.id));
-
-				return user;
-			});
-
-			return reply.code(201).send({
-				user: {
-					id:        newUser.id,
-					email:     newUser.email,
-					firstName: newUser.firstName,
-					lastName:  newUser.lastName,
-					role:      newUser.role,
-					companyId: newUser.companyId,
-				},
-			});
-		} catch (err) {
-			await supabase.auth.admin.deleteUser(authUserId).catch(() => {});
-			return reply.code(502).send({ error: `Failed to create user profile: ${err.message}` });
-		}
+		return reply.code(201).send({
+			user: {
+				id:        newUser.id,
+				email:     newUser.email,
+				firstName: newUser.firstName,
+				lastName:  newUser.lastName,
+				role:      newUser.role,
+				companyId: newUser.companyId,
+			},
+		});
+	} catch (err) {
+		await supabase.auth.admin.deleteUser(authUserId).catch(() => {});
+		return reply.code(502).send({ error: `Failed to create user profile: ${err.message}` });
 	}
+}
+
+// ==========================
+// POST /auth/signUp-admin
+// ==========================
+
+export async function signUpAdmin(request, reply) {
+	const { email, password, firstName, lastName, company } = request.body;
 
 	if (!company?.name || !company?.dotNumber) {
 		return reply.code(400).send({
@@ -120,11 +129,13 @@ export async function signUp(request, reply) {
 		});
 	}
 
+	const supabase = getSupabase();
+
 	// Create Supabase Auth user first
 	const { data: authData, error: authError } = await supabase.auth.admin.createUser({
 		email,
 		password,
-		email_confirm: true,
+		email_confirm: false,
 	});
 
 	if (authError) {
@@ -438,4 +449,17 @@ export async function getCompanyUsers(request, reply) {
 		.where(eq(users.companyId, requester.companyId));
  
 	return reply.send({ users: members });
+}
+
+export async function handleConfirmationWebhook(request, reply) {
+    const { record, old_record } = request.body;
+
+    if (record.email_confirmed_at && !old_record.email_confirmed_at) {
+        await db
+            .update(users)
+            .set({ isEmailConfirmed: true })
+            .where(eq(users.id, record.id));
+    }
+
+    return reply.code(200).send({ ok: true });
 }

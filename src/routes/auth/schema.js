@@ -1,17 +1,10 @@
-// ─── POST /auth/signUp ────────────────────────────────────────────────────────
-//
-// Two paths share the same endpoint:
-//   • inviteToken present  → invited user joining an existing company
-//   • no inviteToken       → admin registering a brand-new company
-//     (requires company.name + company.dotNumber in the body)
+// ─── POST /auth/signUpByInvite ────────────────────────────────────────────────────────
 
-export const signUpSchema = {
+export const signUpByInviteSchema = {
 	tags: ['Auth'],
-	summary: 'Register a new user',
+	summary: 'Register a new user by invite',
 	description:
-		'**Path A — invited user:** provide `inviteToken`. The user is linked to the inviting company automatically.\n\n' +
-		'**Path B — admin + new company:** omit `inviteToken` and include a `company` object with `name` and `dotNumber`. ' +
-		'The company is created, the user is set as its admin, and `company.ownerId` is back-filled in one transaction.',
+		'**Invited user:** provide `inviteToken`. The user is linked to the inviting company automatically.\n\n',
 	body: {
 		type: 'object',
 		required: ['email', 'password', 'firstName', 'lastName'],
@@ -24,6 +17,44 @@ export const signUpSchema = {
 				type: 'string',
 				description: 'Path A only. Token received in the invitation email.',
 			},
+		},
+	},
+	response: {
+		201: {
+			type: 'object',
+			properties: {
+				user: {
+					type: 'object',
+					properties: {
+						id:        { type: 'string', format: 'uuid' },
+						email:     { type: 'string', format: 'email' },
+						firstName: { type: 'string' },
+						lastName:  { type: 'string' },
+						role:      { type: 'string' },
+						companyId: { type: 'string', format: 'uuid', nullable: true },
+					},
+				},
+			},
+		},
+	},
+};
+
+// ─── POST /auth/signUpAdmin ────────────────────────────────────────────────────────
+
+export const signUpAdminSchema = {
+	tags: ['Auth'],
+	summary: 'Register a new user and company',
+	description:
+		'**Admin + new company:** omit `inviteToken` and include a `company` object with `name` and `dotNumber`. ' +
+		'The company is created, the user is set as its admin, and `company.ownerId` is back-filled in one transaction.',
+	body: {
+		type: 'object',
+		required: ['email', 'password', 'firstName', 'lastName'],
+		properties: {
+			email:       { type: 'string', format: 'email' },
+			password:    { type: 'string', minLength: 8 },
+			firstName:   { type: 'string', minLength: 1 },
+			lastName:    { type: 'string', minLength: 1 },
 			company: {
 				type: 'object',
 				description: 'Path B only. Required when registering without an invite token.',
@@ -51,7 +82,6 @@ export const signUpSchema = {
 						companyId: { type: 'string', format: 'uuid', nullable: true },
 					},
 				},
-				// Only present in Path B
 				company: {
 					type: 'object',
 					nullable: true,
@@ -251,4 +281,59 @@ export const getCompanyUsersSchema = {
 			},
 		},
 	},
+};
+
+// ─── POST /webhook/confirm ──────────────────────────────────────────────────────────
+
+export const handleConfirmationWebhookSchema = {
+    tags: ['Auth', 'Webhooks'],
+    summary: 'Supabase Auth Webhook',
+    description: 'Receives database update events from Supabase auth.users table to sync email confirmation status.',
+    body: {
+        type: 'object',
+        required: ['record', 'old_record'],
+        properties: {
+            record: {
+                type: 'object',
+                required: ['id'],
+                properties: {
+                    id: { type: 'string', format: 'uuid' },
+                    email_confirmed_at: { 
+                        type: ['string', 'null'], 
+                        format: 'date-time',
+                        description: 'Timestamp when the email was confirmed' 
+                    },
+                },
+                additionalProperties: true,
+            },
+            old_record: {
+                type: 'object',
+                properties: {
+                    id: { type: 'string', format: 'uuid' },
+                    email_confirmed_at: { 
+                        type: ['string', 'null'], 
+                        format: 'date-time' 
+                    },
+                },
+                additionalProperties: true,
+            },
+            type: { type: 'string', example: 'UPDATE' },
+            table: { type: 'string', example: 'users' },
+            schema: { type: 'string', example: 'auth' },
+        },
+    },
+    response: {
+        200: {
+            type: 'object',
+            properties: {
+                ok: { type: 'boolean' },
+            },
+        },
+        401: {
+            type: 'object',
+            properties: {
+                error: { type: 'string' },
+            },
+        },
+    },
 };
