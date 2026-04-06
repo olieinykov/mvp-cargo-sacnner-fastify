@@ -307,7 +307,8 @@ export const handleConfirmationWebhookSchema = {
                 additionalProperties: true,
             },
             old_record: {
-                type: 'object',
+                // Разрешаем null на случай, если Supabase его пришлет
+                type: ['object', 'null'], 
                 properties: {
                     id: { type: 'string', format: 'uuid' },
                     email_confirmed_at: { 
@@ -317,9 +318,9 @@ export const handleConfirmationWebhookSchema = {
                 },
                 additionalProperties: true,
             },
-            type: { type: 'string', example: 'UPDATE' },
-            table: { type: 'string', example: 'users' },
-            schema: { type: 'string', example: 'auth' },
+            type: { type: 'string', examples: ['UPDATE'] },
+            table: { type: 'string', examples: ['users'] },
+            schema: { type: 'string', examples: ['auth'] },
         },
     },
     response: {
