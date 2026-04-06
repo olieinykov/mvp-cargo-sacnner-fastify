@@ -477,25 +477,32 @@ export async function getCompanyUsers(request, reply) {
 }
 
 export async function handleConfirmationWebhook(request, reply) {
-    const { record, old_record } = request.body;
+    const { record } = request.body;
 
-    if (record.email_confirmed_at && !old_record.email_confirmed_at) {
-        await db
-            .update(users)
-            .set({ isEmailConfirmed: true })
-            .where(eq(users.id, record.id));
-
-        const [profile] = await db
-            .select({ companyId: users.companyId })
-            .from(users)
-            .where(eq(users.id, record.id))
-            .limit(1);
-
-        if (profile?.companyId) {
+    if (record && record.email_confirmed_at) {
+        try {
             await db
-                .update(companies)
+                .update(users)
                 .set({ isEmailConfirmed: true })
-                .where(eq(companies.id, profile.companyId));
+                .where(eq(users.id, record.id));
+
+            const [profile] = await db
+                .select({ companyId: users.companyId })
+                .from(users)
+                .where(eq(users.id, record.id))
+                .limit(1);
+
+            if (profile?.companyId) {
+                await db
+                    .update(companies)
+                    .set({ isEmailConfirmed: true })
+                    .where(eq(companies.id, profile.companyId));
+                
+                console.log(`Company ${profile.companyId} confirmed via webhook`);
+            }
+        } catch (error) {
+            console.error('Database update error in webhook:', error);
+            return reply.code(500).send({ error: 'Internal Server Error' });
         }
     }
 
