@@ -803,9 +803,27 @@ function runAudit(bolResults, markerResults, cargoResults, isGlobalHazmat, bolWe
  
 				if (cleanUnNum.length !== 4) continue;
  
-				const entry = hazmatTable?.[`UN${cleanUnNum}`];
+				const rawEntry = hazmatTable?.[`UN${cleanUnNum}`];
+				if (!rawEntry) continue;
+
+				const entryList = Array.isArray(rawEntry) ? rawEntry : [rawEntry];
+
+				const bolPGForLookup = v(bolExt.packingGroup);
+				const normalizedPGForLookup = bolPGForLookup
+					? String(bolPGForLookup).trim().toUpperCase()
+					: null;
+
+				const entry =
+					(normalizedPGForLookup &&
+						entryList.find(
+							(e) =>
+								String(e.expectedData?.packingGroup ?? '').toUpperCase() ===
+								normalizedPGForLookup,
+						)) ??
+					entryList[0];
+
 				if (!entry) continue;
- 
+
 				const expected = entry.expectedData ?? {};
 				const errors   = entry.errors       ?? {};
 				const refs     = entry.references   ?? {};
