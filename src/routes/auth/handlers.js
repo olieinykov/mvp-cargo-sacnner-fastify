@@ -129,20 +129,35 @@ export async function signUpAdmin(request, reply) {
 		});
 	}
 
-	const supabase = getSupabase();
+	const supabaseUrl = process.env.SUPABASE_URL;
+	const supabaseAnonKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
-	// Create Supabase Auth user first
-	const { data: authData, error: authError } = await supabase.auth.admin.createUser({
+	if (!supabaseUrl || !supabaseAnonKey) {
+		return reply.code(500).send({ 
+			error: 'SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY env vars are required.' 
+		});
+	}
+
+	const anonSupabase = createClient(supabaseUrl, supabaseAnonKey, {
+		auth: { autoRefreshToken: false, persistSession: false },
+	});
+
+	const adminSupabase = getSupabase();
+
+	const { data: authData, error: authError } = await anonSupabase.auth.signUp({
 		email,
 		password,
-		email_confirm: false,
 	});
 
 	if (authError) {
 		return reply.code(authError.status ?? 400).send({ error: authError.message });
 	}
 
-	const authUserId = authData.user.id;
+	const authUserId = authData.user?.id;
+
+	if (!authUserId) {
+		return reply.code(400).send({ error: 'Failed to retrieve user ID after signup.' });
+	}
 
 	try {
 		const { newUser, newCompany } = await db.transaction(async (tx) => {
@@ -155,7 +170,6 @@ export async function signUpAdmin(request, reply) {
 				})
 				.returning();
 
-			// 2. Create the admin user linked to this company
 			const [user] = await tx
 				.insert(users)
 				.values({
@@ -168,7 +182,6 @@ export async function signUpAdmin(request, reply) {
 				})
 				.returning();
 
-			// 3. Set ownerId on the company now that we have the user id
 			const [updatedCompany] = await tx
 				.update(companies)
 				.set({ ownerId: user.id })
@@ -197,7 +210,7 @@ export async function signUpAdmin(request, reply) {
 			},
 		});
 	} catch (err) {
-		await supabase.auth.admin.deleteUser(authUserId).catch(() => {});
+		await adminSupabase.auth.admin.deleteUser(authUserId).catch(() => {});
 		return reply.code(502).send({ error: `Failed to create company or user profile: ${err.message}` });
 	}
 }
@@ -224,6 +237,18 @@ export async function signIn(request, reply) {
 		.from(users)
 		.where(eq(users.id, authUser.id))
 		.limit(1);
+
+	if (profile?.companyId) {
+		const [company] = await db
+			.select({ isEmailConfirmed: companies.isEmailConfirmed })
+			.from(companies)
+			.where(eq(companies.id, profile.companyId))
+			.limit(1);
+
+		if (company && !company.isEmailConfirmed) {
+			return reply.code(403).send({ error: 'EMAIL_NOT_CONFIRMED' });
+		}
+	}
 
 	return reply.send({
 		accessToken:  session.access_token,
@@ -459,6 +484,19 @@ export async function handleConfirmationWebhook(request, reply) {
             .update(users)
             .set({ isEmailConfirmed: true })
             .where(eq(users.id, record.id));
+
+        const [profile] = await db
+            .select({ companyId: users.companyId })
+            .from(users)
+            .where(eq(users.id, record.id))
+            .limit(1);
+
+        if (profile?.companyId) {
+            await db
+                .update(companies)
+                .set({ isEmailConfirmed: true })
+                .where(eq(companies.id, profile.companyId));
+        }
     }
 
     return reply.code(200).send({ ok: true });
