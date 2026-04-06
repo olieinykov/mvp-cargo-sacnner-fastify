@@ -1,5 +1,5 @@
-import { signIn, createInvitation, getInviteInfo, getCompanyUsers, signUpByInvite, signUpAdmin, handleConfirmationWebhook } from './handlers.js';
-import { signInSchema, createInvitationSchema, getInviteInfoSchema, getCompanyUsersSchema, signUpByInviteSchema, signUpAdminSchema, handleConfirmationWebhookSchema } from './schema.js';
+import { signIn, createInvitation, getInviteInfo, getCompanyUsers, signUpByInvite, signUpAdmin } from './handlers.js';
+import { signInSchema, createInvitationSchema, getInviteInfoSchema, getCompanyUsersSchema, signUpByInviteSchema, signUpAdminSchema } from './schema.js';
 
 const routes = async (fastify) => {
 	fastify.post('/signUp-invite', {
@@ -30,11 +30,6 @@ const routes = async (fastify) => {
 	fastify.get('/users', {
 		handler: getCompanyUsers,
 		schema:  getCompanyUsersSchema,
-	});
-
-	fastify.post('/webhook/confirm', {
-		handler: handleConfirmationWebhook,
-		schema:  handleConfirmationWebhookSchema,
 	});
 };
 

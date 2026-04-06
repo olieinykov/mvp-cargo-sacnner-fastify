@@ -232,21 +232,27 @@ export async function signIn(request, reply) {
 
 	const { session, user: authUser } = data;
 
+	if (!authUser.email_confirmed_at) {
+		return reply.code(403).send({ error: 'EMAIL_NOT_CONFIRMED' });
+	}
+
 	const [profile] = await db
 		.select()
 		.from(users)
 		.where(eq(users.id, authUser.id))
 		.limit(1);
 
-	if (profile?.companyId) {
-		const [company] = await db
-			.select({ isEmailConfirmed: companies.isEmailConfirmed })
-			.from(companies)
-			.where(eq(companies.id, profile.companyId))
-			.limit(1);
+	if (profile && !profile.isEmailConfirmed) {
+		await db
+			.update(users)
+			.set({ isEmailConfirmed: true })
+			.where(eq(users.id, authUser.id));
 
-		if (company && !company.isEmailConfirmed) {
-			return reply.code(403).send({ error: 'EMAIL_NOT_CONFIRMED' });
+		if (profile.companyId) {
+			await db
+				.update(companies)
+				.set({ isEmailConfirmed: true })
+				.where(eq(companies.id, profile.companyId));
 		}
 	}
 
@@ -474,54 +480,4 @@ export async function getCompanyUsers(request, reply) {
 		.where(eq(users.companyId, requester.companyId));
  
 	return reply.send({ users: members });
-}
-
-export async function handleConfirmationWebhook(request, reply) {
-    // Supabase sends { type, table, record, old_record, schema }
-    const { record, old_record } = request.body;
- 
-    // Only handle UPDATE events where email_confirmed_at just appeared
-    const justConfirmed =
-        record?.email_confirmed_at &&
-        !old_record?.email_confirmed_at;
- 
-    if (!justConfirmed) {
-        return reply.code(200).send({ ok: true, skipped: true });
-    }
- 
-    const authUserId = record.id;
- 
-    try {
-        // 1. Mark user as confirmed
-        await db
-            .update(users)
-            .set({ isEmailConfirmed: true })
-            .where(eq(users.id, authUserId));
- 
-        // 2. Find their company and mark it confirmed too
-        const [profile] = await db
-            .select({ companyId: users.companyId })
-            .from(users)
-            .where(eq(users.id, authUserId))
-            .limit(1);
- 
-        if (!profile) {
-            console.warn(`[webhook] No profile found for auth user ${authUserId}`);
-            return reply.code(200).send({ ok: true, warning: 'profile_not_found' });
-        }
- 
-        if (profile.companyId) {
-            await db
-                .update(companies)
-                .set({ isEmailConfirmed: true })
-                .where(eq(companies.id, profile.companyId));
- 
-            console.log(`[webhook] Confirmed user ${authUserId} and company ${profile.companyId}`);
-        }
- 
-        return reply.code(200).send({ ok: true });
-    } catch (error) {
-        console.error('[webhook] DB error:', error);
-        return reply.code(200).send({ ok: false, error: error.message });
-    }
 }
