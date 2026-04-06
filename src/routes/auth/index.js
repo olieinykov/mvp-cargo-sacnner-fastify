@@ -2,17 +2,17 @@ import { signIn, createInvitation, getInviteInfo, getCompanyUsers, signUpByInvit
 import { signInSchema, createInvitationSchema, getInviteInfoSchema, getCompanyUsersSchema, signUpByInviteSchema, signUpAdminSchema } from './schema.js';
 
 const routes = async (fastify) => {
-	fastify.post('/signUp-invite', {
+	fastify.post('/sign-up-invite', {
 		handler: signUpByInvite,
 		schema:  signUpByInviteSchema,
 	});
 
-	fastify.post('/signUp-admin', {
+	fastify.post('/sign-up-company', {
 		handler: signUpAdmin,
 		schema:  signUpAdminSchema,
 	});
 
-	fastify.post('/signIn', {
+	fastify.post('/sign-in', {
 		handler: signIn,
 		schema:  signInSchema,
 	});
