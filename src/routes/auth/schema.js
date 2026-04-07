@@ -282,3 +282,44 @@ export const getCompanyUsersSchema = {
 		},
 	},
 };
+
+// ─── GET /auth/me ─────────────────────────────────────────────────────────────
+
+export const getMeSchema = {
+	tags: ['Auth'],
+	summary: 'Get current user profile',
+	description: 'Returns the profile of the currently authenticated user along with their company details. Requires `Authorization: Bearer <access_token>`.',
+	headers: {
+		type: 'object',
+		required: ['authorization'],
+		properties: {
+			authorization: { type: 'string', description: 'Bearer <access_token>' },
+		},
+	},
+	response: {
+		200: {
+			type: 'object',
+			properties: {
+				id:               { type: 'string', format: 'uuid' },
+				email:            { type: 'string', format: 'email' },
+				firstName:        { type: 'string' },
+				lastName:         { type: 'string' },
+				role:             { type: 'string' },
+				companyId:        { type: 'string', format: 'uuid', nullable: true },
+				registrationData: { type: 'string', format: 'date-time' },
+				isEmailConfirmed: { type: 'boolean' },
+				companyName:      { type: 'string' },
+			},
+		},
+		401: {
+			type: 'object',
+			description: 'Missing or invalid Authorization header.',
+			properties: { error: { type: 'string' } },
+		},
+		404: {
+			type: 'object',
+			description: 'User profile not found.',
+			properties: { error: { type: 'string' } },
+		},
+	},
+};

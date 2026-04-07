@@ -481,3 +481,57 @@ export async function getCompanyUsers(request, reply) {
  
 	return reply.send({ users: members });
 }
+
+// ==========================
+// GET /auth/me
+// ==========================
+
+export async function getMe(request, reply) {
+	const authHeader = request.headers.authorization ?? '';
+	const token = authHeader.replace(/^Bearer\s+/i, '').trim();
+
+	if (!token) {
+		return reply.code(401).send({ error: 'Missing Authorization header.' });
+	}
+
+	const supabase = getSupabase();
+
+	const { data: { user: authUser }, error: userError } = await supabase.auth.getUser(token);
+
+	if (userError || !authUser) {
+		return reply.code(401).send({ error: 'Invalid or expired token.' });
+	}
+
+	const [result] = await db
+		.select({
+			id:               users.id,
+			email:            users.email,
+			firstName:        users.firstName,
+			lastName:         users.lastName,
+			role:             users.role,
+			companyId:        users.companyId,
+			registrationData: users.registrationData,
+			isEmailConfirmed: users.isEmailConfirmed,
+			companyName:      companies.name,
+		})
+		.from(users)
+		.leftJoin(companies, eq(users.companyId, companies.id))
+		.where(eq(users.id, authUser.id))
+		.limit(1);
+
+	if (!result) {
+		return reply.code(404).send({ error: 'User profile not found.' });
+	}
+
+	return reply.send({
+		id: result.id,
+		email: result.email,
+		firstName: result.firstName,
+		lastName: result.lastName,
+		role: result.role,
+		companyId: result.companyId,
+		registrationData: result.registrationData,
+		isEmailConfirmed: result.isEmailConfirmed,
+		companyName: result.companyName,
+	});
+}

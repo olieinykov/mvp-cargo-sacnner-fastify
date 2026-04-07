@@ -1,5 +1,5 @@
-import { signIn, createInvitation, getInviteInfo, getCompanyUsers, signUpByInvite, signUpAdmin } from './handlers.js';
-import { signInSchema, createInvitationSchema, getInviteInfoSchema, getCompanyUsersSchema, signUpByInviteSchema, signUpAdminSchema } from './schema.js';
+import { signIn, createInvitation, getInviteInfo, getCompanyUsers, signUpByInvite, signUpAdmin, getMe } from './handlers.js';
+import { signInSchema, createInvitationSchema, getInviteInfoSchema, getCompanyUsersSchema, signUpByInviteSchema, signUpAdminSchema, getMeSchema } from './schema.js';
 
 const routes = async (fastify) => {
 	fastify.post('/sign-up-invite', {
@@ -30,6 +30,11 @@ const routes = async (fastify) => {
 	fastify.get('/users', {
 		handler: getCompanyUsers,
 		schema:  getCompanyUsersSchema,
+	});
+
+	fastify.get('/me', {
+		handler: getMe,
+		schema:  getMeSchema,
 	});
 };
 

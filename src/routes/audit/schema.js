@@ -1,13 +1,18 @@
 export const getAuditsSchema = {
 	tags: ['Audit'],
 	summary: 'Get all audits',
-	description: 'Returns paginated list of audits ordered by creation date descending',
+	description: 'Returns paginated list of audits with optional sorting and filtering',
 	querystring: {
 		type: 'object',
 		properties: {
-			page:  { type: 'integer', minimum: 1, default: 1 },
-			limit: { type: 'integer', minimum: 1, maximum: 100, default: 20 },
+			page:      { type: 'integer', minimum: 1, default: 1 },
+			limit:     { type: 'integer', minimum: 1, maximum: 100, default: 20 },
 			auditorId: { type: 'string' },
+			sortBy:    { type: 'string', enum: ['date', 'score'], default: 'date' },
+			sortOrder: { type: 'string', enum: ['asc', 'desc'], default: 'desc' },
+			status:    { type: 'string', enum: ['passed', 'failed'] },
+			dateFrom:  { type: 'string', format: 'date-time', description: 'ISO date string (e.g., 2026-04-01T00:00:00Z)' },
+			dateTo:    { type: 'string', format: 'date-time', description: 'ISO date string' },
 		},
 	},
 	response: {

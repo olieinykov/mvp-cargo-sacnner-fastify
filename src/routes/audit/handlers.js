@@ -1,7 +1,7 @@
 import { requireAnthropic } from '../../lib/cloudeClient.js';
 import { db } from '../../db/connection.js';
 import { audits } from '../../db/schema.js';
-import { count, desc, eq } from 'drizzle-orm';
+import { count, desc, asc, eq, and, gte, lte } from 'drizzle-orm';
 import { createClient } from '@supabase/supabase-js';
 import { randomUUID } from 'node:crypto';
 import hazmatTable from '../../data/hazmat_data.json' with { type: 'json' };
@@ -1507,10 +1507,40 @@ export async function createAudit(request, reply) {
 // ==========================
  
 export async function getAudits(request, reply) {
-	const { page = 1, limit = 20, auditorId } = request.query;
-	const offset = (page - 1) * limit;
+	const { 
+		page = 1, 
+		limit = 20, 
+		auditorId,
+		sortBy = 'date',     // 'date' | 'score'
+		sortOrder = 'desc',  // 'asc' | 'desc'
+		status,              // 'passed' | 'failed'
+		dateFrom,            // ISO строка (напр. '2026-04-01T00:00:00Z')
+		dateTo               // ISO строка
+	} = request.query;
+
+	const offset = (Number(page) - 1) * Number(limit);
  
 	try {
+		const conditions = [eq(audits.auditorId, auditorId)];
+
+		if (status === 'passed') {
+			conditions.push(eq(audits.is_passed, 'true'));
+		} else if (status === 'failed') {
+			conditions.push(eq(audits.is_passed, 'false'));
+		}
+
+		if (dateFrom) {
+			conditions.push(gte(audits.created_at, new Date(dateFrom)));
+		}
+		if (dateTo) {
+			conditions.push(lte(audits.created_at, new Date(dateTo)));
+		}
+
+		const whereFilter = conditions.length === 1 ? conditions[0] : and(...conditions);
+
+		const sortColumn = sortBy === 'score' ? audits.score : audits.created_at;
+		const orderByClause = sortOrder === 'asc' ? asc(sortColumn) : desc(sortColumn);
+
 		const [rows, [{ total }]] = await Promise.all([
 			db
 				.select({
@@ -1522,21 +1552,22 @@ export async function getAudits(request, reply) {
 					auditImages: audits.auditImages,
 				})
 				.from(audits)
-				.where(eq(audits.auditorId, auditorId))
-				.orderBy(desc(audits.created_at))
-				.limit(limit)
+				.where(whereFilter)
+				.orderBy(orderByClause)
+				.limit(Number(limit))
 				.offset(offset),
-			db.select({ total: count() }).from(audits).where(eq(audits.auditorId, auditorId)),
+			
+			db.select({ total: count() }).from(audits).where(whereFilter),
 		]);
  
-		const totalPages = Math.ceil(total / limit);
+		const totalPages = Math.ceil(total / Number(limit));
  
 		return reply.send({
 			data: rows,
 			pagination: {
 				total,
-				page,
-				limit,
+				page: Number(page),
+				limit: Number(limit),
 				totalPages,
 				hasNextPage: page < totalPages,
 				hasPrevPage: page > 1,
