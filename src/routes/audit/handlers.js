@@ -810,7 +810,7 @@ function runAudit(bolResults, markerResults, cargoResults, isGlobalHazmat, bolWe
 
 				const bolPGForLookup = v(bolExt.packingGroup);
 				const normalizedPGForLookup = bolPGForLookup
-					? String(bolPGForLookup).trim().toUpperCase()
+					? String(bolPGForLookup).toUpperCase().replace(/[^IV]/g, '')
 					: null;
 
 				const entry =
@@ -839,7 +839,7 @@ function runAudit(bolResults, markerResults, cargoResults, isGlobalHazmat, bolWe
 						source:   'BOL',
 						severity: 'CRITICAL',
 						cfr:      '49 CFR 172.101',
-						check:    'Hazard Class (Global Table)',
+						check:    'Hazard Class',
 						message:  errors.hazardClassMismatch
 							?? `UN${unNum}: hazard class mismatch. BOL shows ${bolClassArr.join('/')}, expected ${expected.hazardClass}.`,
 						fix: `Correct the hazard class to "${expected.hazardClass}" per the DOT Hazardous Materials Table.`,
@@ -860,7 +860,7 @@ function runAudit(bolResults, markerResults, cargoResults, isGlobalHazmat, bolWe
 						source:   'BOL',
 						severity: 'CRITICAL',
 						cfr:      '49 CFR 172.101',
-						check:    'Packing Group (Global Table)',
+						check:    'Packing Group',
 						message:  errors.packingGroupMismatch
 							?? `UN${unNum}: packing group mismatch. BOL shows PG ${normalizedPG}, expected PG ${expected.packingGroup}.`,
 						fix: `Correct the packing group to "${expected.packingGroup}" per the DOT Hazardous Materials Table.`,
@@ -899,7 +899,7 @@ function runAudit(bolResults, markerResults, cargoResults, isGlobalHazmat, bolWe
 							source:   'BOL',
 							severity: 'MAJOR',
 							cfr:      '49 CFR 172.202(a)(1)',
-							check:    'Proper Shipping Name (Global Table)',
+							check:    'Proper Shipping Name',
 							message:  `UN${unNum}: proper shipping name mismatch. BOL shows "${bolPSN.trim()}", expected "${expectedPSN}".`,
 							fix: `Use the exact DOT proper shipping name: "${expectedPSN}".`,
 						});
@@ -918,7 +918,7 @@ function runAudit(bolResults, markerResults, cargoResults, isGlobalHazmat, bolWe
 							source:   'BOL',
 							severity: 'MAJOR',
 							cfr:      '49 CFR 172.400',
-							check:    'Label Codes (Global Table)',
+							check:    'Label Codes',
 							message:  errors.labelingViolation
 								?? `UN${unNum}: missing or incorrect label codes on BOL. Required: ${requiredLabels.join(', ')}.`,
 							fix: `Ensure all required label codes (${requiredLabels.join(', ')}) are reflected on the BOL and cargo packaging.`,
@@ -940,7 +940,7 @@ function runAudit(bolResults, markerResults, cargoResults, isGlobalHazmat, bolWe
 				//			source:   'BOL',
 				//			severity: 'MAJOR',
 				//			cfr:      '49 CFR 173',
-				//			check:    'Packaging Requirements (Global Table)',
+				//			check:    'Packaging Requirements',
 				//			message:  errors.packagingViolation
 				//				?? `UN${unNum}: packaging requirements violation. Refer to 49 CFR: ${parts}.`,
 				//			fix: `Verify packaging against 49 CFR ${parts}.`,
@@ -955,7 +955,7 @@ function runAudit(bolResults, markerResults, cargoResults, isGlobalHazmat, bolWe
 				//			source:   'BOL',
 				//			severity: 'WARNING',
 				//			cfr:      '49 CFR 172.102',
-				//			check:    'Special Provisions (Global Table)',
+				//			check:    'Special Provisions',
 				//			message:  errors.specialProvisionsViolation
 				//				?? `UN${unNum}: special provisions violation (${refs.specialProvisions}). See 49 CFR § 172.102.`,
 				//			fix: `Review and comply with special provisions: ${refs.specialProvisions}.`,
