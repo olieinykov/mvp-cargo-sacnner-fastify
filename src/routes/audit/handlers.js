@@ -6,6 +6,7 @@ import { createClient } from '@supabase/supabase-js';
 import { randomUUID } from 'node:crypto';
 import hazmatTable from '../../data/hazmat_data.json' with { type: 'json' };
 import { HAZMAT_PLACARD_RULES } from '../../data/placard_data.js';
+import { pdf } from 'pdf-to-img';
 
 // ==========================
 // Supabase client
@@ -1392,43 +1393,68 @@ function runAudit(bolResults, markerResults, cargoResults, isGlobalHazmat, bolWe
 // POST /audit/upload
 // ==========================
  
+
+const isPdfBuffer = (buffer) => {
+	if (!buffer || buffer.length < 4) return false;
+	return buffer.subarray(0, 4).toString('ascii') === '%PDF';
+};
+
 export async function uploadAuditImages(request, reply) {
 	const allFiles = toArray(request.body.images);
- 
+
 	if (allFiles.length === 0) {
 		return reply.code(400).send({ error: 'Field "images" is required.' });
 	}
- 
+
+	let processedFiles = [];
+
 	for (const file of allFiles) {
-		if (!file.mimetype || !file.mimetype.startsWith('image/')) {
-			return reply.code(400).send({ error: `All files must be images (image/*). Got: ${file.mimetype}` });
-		}
 		if (!file._buf || file._buf.length === 0) {
 			return reply.code(400).send({ error: 'One or more files are empty.' });
 		}
+
+		if (isPdfBuffer(file._buf)) {
+			try {
+				const document = await pdf(file._buf, { scale: 1.0 }); 
+				
+				for await (const pageBuf of document) {
+					processedFiles.push({
+						mimetype: 'image/png',
+						_buf: pageBuf,
+					});
+				}
+			} catch (err) {
+				return reply.code(500).send({ error: `Failed to parse PDF: ${err.message}` });
+			}
+		} else {
+			if (!file.mimetype || !file.mimetype.startsWith('image/')) {
+				return reply.code(400).send({ error: `Expected image or PDF. Got: ${file.mimetype}` });
+			}
+			processedFiles.push(file);
+		}
 	}
- 
+
 	const { client: supabase, bucket } = getSupabase();
- 
+
 	const uploaded = await Promise.all(
-		allFiles.map(async (file) => {
-			const ext = file.mimetype.split('/')[1] ?? 'jpg';
+		processedFiles.map(async (file) => {
+			const ext = file.mimetype.split('/')[1] ?? 'jpg'; 
 			const storageId = `${randomUUID()}.${ext}`;
- 
+
 			const { error } = await supabase.storage
 				.from(bucket)
 				.upload(storageId, file._buf, { contentType: file.mimetype, upsert: false });
- 
+
 			if (error) {
 				throw Object.assign(new Error(`Supabase upload failed: ${error.message}`), { statusCode: 502 });
 			}
- 
+
 			const { data: publicData } = supabase.storage.from(bucket).getPublicUrl(storageId);
- 
+
 			return { id: storageId, url: publicData.publicUrl };
 		}),
 	);
- 
+
 	return reply.send({ images: uploaded });
 }
 
