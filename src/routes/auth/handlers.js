@@ -372,8 +372,7 @@ export async function createInvitation(request, reply) {
 	});
 
 	if (emailError) {
-		// Non-fatal — invitation is stored; email can be resent later
-		console.error('Failed to send invite email:', emailError.message);
+		return reply.code(500).send({ error: `Failed to resend email: ${emailError.message}` });
 	}
 
 	return reply.code(201).send({
