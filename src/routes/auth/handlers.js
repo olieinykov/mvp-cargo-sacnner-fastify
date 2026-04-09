@@ -359,7 +359,7 @@ export async function createInvitation(request, reply) {
 		.returning();
 
 	// Send invite email via Supabase
-	const appUrl     = process.env.APP_URL ?? 'http://localhost:5173';
+	const appUrl     = 'https://mvp-cargo-sacnner-fe.vercel.app';
 	const inviteLink = `${appUrl}/invite?token=${inviteToken}`;
 
 	const { error: emailError } = await supabase.auth.admin.inviteUserByEmail(email, {
@@ -533,5 +533,274 @@ export async function getMe(request, reply) {
 		registrationData: result.registrationData,
 		isEmailConfirmed: result.isEmailConfirmed,
 		companyName: result.companyName,
+	});
+}
+
+// ==========================
+// POST /auth/request-password-reset
+// ==========================
+
+export async function requestPasswordReset(request, reply) {
+	const { email } = request.body;
+
+	const [existingUser] = await db
+		.select({ id: users.id })
+		.from(users)
+		.where(eq(users.email, email.toLowerCase()))
+		.limit(1);
+
+	if (!existingUser) {
+		return reply.code(404).send({ error: 'User with this email does not exist.' });
+	}
+
+	const supabase = getSupabase();
+	
+	const appUrl = 'https://mvp-cargo-sacnner-fe.vercel.app';
+	const resetLink = `${appUrl}/update-password`;
+
+	const { error } = await supabase.auth.resetPasswordForEmail(email, {
+		redirectTo: resetLink,
+	});
+
+	if (error) {
+		return reply.code(error.status ?? 400).send({ error: error.message });
+	}
+
+	return reply.send({ message: 'A password reset link has been sent to your email' });
+}
+// ==========================
+// POST /auth/update-password
+// ==========================
+
+export async function updatePassword(request, reply) {
+	const { password } = request.body;
+	const authHeader = request.headers.authorization ?? '';
+	const token = authHeader.replace(/^Bearer\s+/i, '').trim();
+
+	if (!token) {
+		return reply.code(401).send({ error: 'Missing Authorization header.' });
+	}
+
+	const supabase = getSupabase();
+
+	const { data: { user }, error: userError } = await supabase.auth.getUser(token);
+
+	if (userError || !user) {
+		return reply.code(401).send({ error: 'Invalid or expired recovery token.' });
+	}
+
+	const { error: updateError } = await supabase.auth.admin.updateUserById(user.id, {
+		password: password
+	});
+
+	if (updateError) {
+		return reply.code(updateError.status ?? 400).send({ error: updateError.message });
+	}
+
+	return reply.send({ message: 'Password updated successfully' });
+}
+
+// ==========================
+// GET /auth/invitations
+// ==========================
+
+export async function getPendingInvitations(request, reply) {
+	const authHeader = request.headers.authorization ?? '';
+	const token = authHeader.replace(/^Bearer\s+/i, '').trim();
+
+	if (!token) return reply.code(401).send({ error: 'Missing Authorization header.' });
+
+	const supabase = getSupabase();
+	const { data: { user: authUser }, error: userError } = await supabase.auth.getUser(token);
+
+	if (userError || !authUser) return reply.code(401).send({ error: 'Invalid or expired token.' });
+
+	const [admin] = await db.select().from(users).where(eq(users.id, authUser.id)).limit(1);
+
+	if (!admin || admin.role !== 'admin' || !admin.companyId) {
+		return reply.code(403).send({ error: 'Admin access required.' });
+	}
+
+	const pendingInvites = await db
+		.select({
+			id: invitations.id,
+			email: invitations.email,
+			role: invitations.role,
+			expiresAt: invitations.expiresAt,
+			token: invitations.token
+		})
+		.from(invitations)
+		.where(
+			and(
+				eq(invitations.companyId, admin.companyId),
+				eq(invitations.status, 'pending')
+			)
+		);
+
+	return reply.send({ invitations: pendingInvites });
+}
+
+// ==========================
+// POST /auth/invitation/:id/cancel
+// ==========================
+
+export async function cancelInvitation(request, reply) {
+	const { id } = request.params;
+	const authHeader = request.headers.authorization ?? '';
+	const token = authHeader.replace(/^Bearer\s+/i, '').trim();
+
+	if (!token) return reply.code(401).send({ error: 'Missing Authorization header.' });
+
+	const supabase = getSupabase();
+	const { data: { user: authUser }, error: userError } = await supabase.auth.getUser(token);
+
+	if (userError || !authUser) return reply.code(401).send({ error: 'Invalid or expired token.' });
+
+	const [admin] = await db.select().from(users).where(eq(users.id, authUser.id)).limit(1);
+
+	if (!admin || admin.role !== 'admin' || !admin.companyId) {
+		return reply.code(403).send({ error: 'Admin access required.' });
+	}
+
+	const [deletedInvite] = await db
+		.delete(invitations)
+		.where(
+			and(
+				eq(invitations.id, id),
+				eq(invitations.companyId, admin.companyId),
+				eq(invitations.status, 'pending')
+			)
+		)
+		.returning();
+
+	if (!deletedInvite) {
+		return reply.code(404).send({ error: 'Pending invitation not found or already processed.' });
+	}
+
+	return reply.send({ message: 'Invitation has been canceled and removed successfully.' });
+}
+
+// ==========================
+// POST /auth/invitation/:id/resend
+// ==========================
+
+export async function resendInvitation(request, reply) {
+	const { id } = request.params;
+	const authHeader = request.headers.authorization ?? '';
+	const token = authHeader.replace(/^Bearer\s+/i, '').trim();
+
+	if (!token) return reply.code(401).send({ error: 'Missing Authorization header.' });
+
+	const supabase = getSupabase();
+	const { data: { user: authUser }, error: userError } = await supabase.auth.getUser(token);
+
+	if (userError || !authUser) return reply.code(401).send({ error: 'Invalid or expired token.' });
+
+	const [admin] = await db.select().from(users).where(eq(users.id, authUser.id)).limit(1);
+
+	if (!admin || admin.role !== 'admin' || !admin.companyId) {
+		return reply.code(403).send({ error: 'Admin access required.' });
+	}
+
+	const [invite] = await db
+		.select()
+		.from(invitations)
+		.where(
+			and(
+				eq(invitations.id, id),
+				eq(invitations.companyId, admin.companyId),
+				eq(invitations.status, 'pending')
+			)
+		)
+		.limit(1);
+
+	if (!invite) {
+		return reply.code(404).send({ error: 'Pending invitation not found.' });
+	}
+
+	const newExpiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+	await db
+		.update(invitations)
+		.set({ expiresAt: newExpiresAt })
+		.where(eq(invitations.id, invite.id));
+
+	const appUrl = 'https://mvp-cargo-sacnner-fe.vercel.app';
+	const inviteLink = `${appUrl}/invite?token=${invite.token}`;
+
+	const { error: emailError } = await supabase.auth.admin.inviteUserByEmail(invite.email, {
+		data: {
+			invite_token: invite.token,
+			company_id: admin.companyId,
+			invited_by: admin.id,
+		},
+		redirectTo: inviteLink,
+	});
+
+	if (emailError) {
+		return reply.code(500).send({ error: `Failed to resend email: ${emailError.message}` });
+	}
+
+	return reply.send({ message: 'Invitation resent successfully.', expiresAt: newExpiresAt });
+}
+
+// ==========================
+// PATCH /auth/users/:userId/role
+// ==========================
+
+export async function updateUserRole(request, reply) {
+	const { userId } = request.params;
+	const { role } = request.body;
+	const authHeader = request.headers.authorization ?? '';
+	const token = authHeader.replace(/^Bearer\s+/i, '').trim();
+
+	if (!token) return reply.code(401).send({ error: 'Missing Authorization header.' });
+
+	const supabase = getSupabase();
+	const { data: { user: authUser }, error: userError } = await supabase.auth.getUser(token);
+
+	if (userError || !authUser) return reply.code(401).send({ error: 'Invalid or expired token.' });
+
+	const [admin] = await db.select().from(users).where(eq(users.id, authUser.id)).limit(1);
+
+	if (!admin || admin.role !== 'admin' || !admin.companyId) {
+		return reply.code(403).send({ error: 'Admin access required.' });
+	}
+
+	if (admin.id === userId) {
+		return reply.code(400).send({ error: 'You cannot change your own role.' });
+	}
+
+	const [targetUser] = await db
+		.select({ id: users.id, role: users.role })
+		.from(users)
+		.where(
+			and(
+				eq(users.id, userId),
+				eq(users.companyId, admin.companyId)
+			)
+		)
+		.limit(1);
+
+	if (!targetUser) {
+		return reply.code(404).send({ error: 'User not found in your company.' });
+	}
+
+	if (targetUser.role === role) {
+		return reply.code(400).send({ error: `User already has the '${role}' role.` });
+	}
+
+	const [updatedUser] = await db
+		.update(users)
+		.set({ role })
+		.where(eq(users.id, userId))
+		.returning();
+
+	return reply.send({
+		message: 'User role updated successfully.',
+		user: {
+			id: updatedUser.id,
+			email: updatedUser.email,
+			role: updatedUser.role,
+		}
 	});
 }

@@ -323,3 +323,181 @@ export const getMeSchema = {
 		},
 	},
 };
+
+// ─── POST /auth/request-password-reset ────────────────────────────────────────
+
+export const requestPasswordResetSchema = {
+	tags: ['Auth'],
+	summary: 'Request password reset',
+	description: 'Sends a password reset link to the specified email address.',
+	body: {
+		type: 'object',
+		required: ['email'],
+		properties: {
+			email: { type: 'string', format: 'email' },
+		},
+	},
+	response: {
+		200: {
+			type: 'object',
+			properties: {
+				message: { type: 'string' },
+			},
+		},
+	},
+};
+
+// ─── POST /auth/update-password ───────────────────────────────────────────────
+
+export const updatePasswordSchema = {
+	tags: ['Auth'],
+	summary: 'Update password',
+	description: 'Updates the user password. Requires `Authorization: Bearer <recovery_token>` obtained from the email link.',
+	headers: {
+		type: 'object',
+		required: ['authorization'],
+		properties: {
+			authorization: { type: 'string', description: 'Bearer <recovery_token>' },
+		},
+	},
+	body: {
+		type: 'object',
+		required: ['password'],
+		properties: {
+			password: { type: 'string', minLength: 8 },
+		},
+	},
+	response: {
+		200: {
+			type: 'object',
+			properties: {
+				message: { type: 'string' },
+			},
+		},
+	},
+};
+
+// ─── GET /auth/invitations ────────────────────────────────────────────────────
+
+export const getPendingInvitationsSchema = {
+	tags: ['Auth', 'Admin'],
+	summary: 'Get pending invitations',
+	description: 'Admin-only. Returns a list of all pending invitations for the company.',
+	headers: {
+		type: 'object',
+		required: ['authorization'],
+		properties: { authorization: { type: 'string', description: 'Bearer <access_token>' } },
+	},
+	response: {
+		200: {
+			type: 'object',
+			properties: {
+				invitations: {
+					type: 'array',
+					items: {
+						type: 'object',
+						properties: {
+							id: { type: 'string', format: 'uuid' },
+							email: { type: 'string', format: 'email' },
+							role: { type: 'string' },
+							expiresAt: { type: 'string', format: 'date-time' },
+							token: { type: 'string' }
+						},
+					},
+				},
+			},
+		},
+	},
+};
+
+// ─── POST /auth/invitation/:id/cancel ─────────────────────────────────────────
+
+export const cancelInvitationSchema = {
+	tags: ['Auth', 'Admin'],
+	summary: 'Cancel an invitation',
+	description: 'Admin-only. Revokes a pending invitation.',
+	headers: {
+		type: 'object',
+		required: ['authorization'],
+		properties: { authorization: { type: 'string' } },
+	},
+	params: {
+		type: 'object',
+		required: ['id'],
+		properties: { id: { type: 'string', format: 'uuid' } },
+	},
+	response: {
+		200: {
+			type: 'object',
+			properties: { message: { type: 'string' } },
+		},
+	},
+};
+
+// ─── POST /auth/invitation/:id/resend ─────────────────────────────────────────
+
+export const resendInvitationSchema = {
+	tags: ['Auth', 'Admin'],
+	summary: 'Resend an invitation',
+	description: 'Admin-only. Extends expiration date and resends the invitation email.',
+	headers: {
+		type: 'object',
+		required: ['authorization'],
+		properties: { authorization: { type: 'string' } },
+	},
+	params: {
+		type: 'object',
+		required: ['id'],
+		properties: { id: { type: 'string', format: 'uuid' } },
+	},
+	response: {
+		200: {
+			type: 'object',
+			properties: { 
+				message: { type: 'string' },
+				expiresAt: { type: 'string', format: 'date-time' }
+			},
+		},
+	},
+};
+
+// ─── PATCH /auth/users/:userId/role ───────────────────────────────────────────
+
+export const updateUserRoleSchema = {
+	tags: ['Auth', 'Admin'],
+	summary: 'Change user role',
+	description: 'Admin-only. Updates the role of a user within the same company.',
+	headers: {
+		type: 'object',
+		required: ['authorization'],
+		properties: { authorization: { type: 'string' } },
+	},
+	params: {
+		type: 'object',
+		required: ['userId'],
+		properties: { userId: { type: 'string', format: 'uuid' } },
+	},
+	body: {
+		type: 'object',
+		required: ['role'],
+		properties: {
+			role: { type: 'string', enum: ['user', 'admin'] }
+		},
+	},
+	response: {
+		200: {
+			type: 'object',
+			properties: {
+				message: { type: 'string' },
+				user: {
+					type: 'object',
+					properties: {
+						id: { type: 'string' },
+						email: { type: 'string' },
+						role: { type: 'string' },
+					}
+				}
+			},
+		},
+	},
+};
