@@ -85,7 +85,8 @@ function buildSystemPrompt(imageType) {
             'FIELD DEFINITIONS (CRITICAL):\n' +
             '- properShippingName: Extract the EXACT text of the Proper Shipping Name printed on the document (e.g., "TOLUENE", "COATING SOLUTION", "CORROSIVE LIQUID, N.O.S."). Do not alter, guess, or abbreviate the text.\n' +
             '- entrySequenceCompliant: true if entry follows DOT order (name → class → UN → PG). false if order differs. null if uncertain.\n' +
-            '- hmColumnMarked: Search the ENTIRE document — not just the table column — for an "X" or "RQ" ' +
+            '- sealNumber: Look for "SEAL#", "Seal Number", or handwritten seal numbers. Extract the exact alphanumeric string. null if not found.\n' +
+			'- hmColumnMarked: Search the ENTIRE document — not just the table column — for an "X" or "RQ" ' +
             'associated with the hazmat line item. On many BOL formats the HM column is merged with other columns ' +
             'or the marking may appear inline within the description text itself, near the UN number, ' +
             'or as a standalone character adjacent to the cargo line. ' +
@@ -116,6 +117,7 @@ function buildSystemPrompt(imageType) {
             '      "hmColumnMarked":             { "mainValue": false,  "meaning": "" },\n' +
             '      "shipperCertificationPresent":{ "mainValue": false,  "meaning": "" },\n' +
             '      "entrySequenceCompliant":     { "mainValue": false,  "meaning": "" },\n' +
+			'      "sealNumber":                 { "mainValue": null,   "meaning": "" },\n' +
             '      "otherNotes": []\n' +
             '    },\n' +
             '    "confidence": { "overall": 0.0, "fields": {} },\n' +
@@ -153,6 +155,32 @@ function buildSystemPrompt(imageType) {
 			'      "placardCondition":           { "mainValue": "unknown", "meaning": "" },\n' +
 			'      "correctOrientation":         { "mainValue": false,     "meaning": "" },\n' +
 			'      "fourSidedPlacementVerified": { "mainValue": false,     "meaning": "" },\n' +
+			'      "otherNotes": []\n' +
+			'    },\n' +
+			'    "confidence": { "overall": 0.0, "fields": {} },\n' +
+			'  "notes": []\n' +
+			'}'
+		);
+	}
+
+	if (imageType === 'sealPhoto') {
+		return (
+			'You are a strict computer vision assistant for a Hazmat Load Audit System. ' +
+			'You will receive exactly ONE image of a physical security seal attached to a truck trailer door. ' +
+			'Follow these steps EXACTLY:\n\n' +
+			'STEP 1: IDENTIFY THE SEAL\n' +
+			'- Locate the plastic or metal security seal. ' +
+			'- Extract the alphanumeric seal number physically printed or embossed on it.\n' +
+			'- CRITICAL WARNING: For stamped/embossed numbers on shiny metal, reflections and shadows heavily distort digits. ' +
+			'Pay extreme attention to distinguishing 8 vs 0, 9 vs 6, 1 vs 7, and 5 vs S. Take your time to analyze the depth and shadow of the engraving.\n\n' +
+			'STEP 2: FORMAT OUTPUT\n' +
+			'- Read ONLY what is physically visible. Do not guess.\n' +
+			'- If no seal number is visible or legible, set mainValue to null.\n\n' +
+			'Respond ONLY with this JSON shape:\n' +
+			'{\n' +
+			'  "slotName": "seal",\n' +
+			'    "extracted": {\n' +
+			'      "sealNumber": { "mainValue": null, "meaning": "" },\n' +
 			'      "otherNotes": []\n' +
 			'    },\n' +
 			'    "confidence": { "overall": 0.0, "fields": {} },\n' +
@@ -396,9 +424,10 @@ async function callClaude(systemPrompt, file, userText) {
 // Keys used for deduplication per slot type (compared by mainValue, otherNotes excluded)
 const DEDUP_KEYS = {
 	bol:     ['isValid', 'unNumber', 'hazardClass', 'packingGroup', 'emergencyPhone',
-	          'hmColumnMarked', 'shipperCertificationPresent', 'entrySequenceCompliant', 'properShippingName'],
+	          'hmColumnMarked', 'shipperCertificationPresent', 'entrySequenceCompliant', 'properShippingName', 'sealNumber'],
 	placard: ['isValid', 'unNumber', 'hazardClass', 'placardCondition', 'correctOrientation', 'fourSidedPlacementVerified'],
 	intrier: ['isValid', 'unNumber', 'hazardClass', 'packageLabelsPresent', 'loadSecured', 'securementType', 'palletUsed', 'noShiftingHazards'],
+	seal:    ['sealNumber'],
 };
 
 function extractionFingerprint(result) {
@@ -454,12 +483,13 @@ async function analyzeImageWithClaude(files, imageType) {
 
 const CLASSIFY_SYSTEM_PROMPT =
 	'You are an image classifier for a Hazmat Load Audit System. ' +
-	'Your ONLY job is to look at the provided image and return exactly ONE of these three category labels:\n\n' +
+	'Your ONLY job is to look at the provided image and return exactly ONE of these four category labels:\n\n' +
 	'  "bolPhoto"     — A Bill of Lading (BOL) or shipping paper document. ' +
 	'Recognisable by printed tables, text fields, shipper/consignee information, signatures, and form-like layout.\n' +
 	'  "markerPhoto"  — The rear or side exterior of a truck trailer showing hazmat placards / diamond-shaped warning signs ' +
 	'mounted on the doors or sides. May also show the trailer number and carrier name on the outside.\n' +
-	'  "cargoPhoto"   — The interior of a trailer or truck showing the loaded cargo (boxes, drums, pallets, straps, etc.).\n\n' +
+	'  "cargoPhoto"   — The interior of a trailer or truck showing the loaded cargo (boxes, drums, pallets, straps, etc.).\n' +
+	'  "sealPhoto"    — A close-up photo of a plastic or metal security seal on a trailer door, typically showing a printed or engraved number.\n\n' +
 	'Rules:\n' +
 	'- Respond ONLY with a JSON object: { "imageType": "<label>" }\n' +
 	'- Do NOT include any explanation, markdown, or extra fields.\n' +
@@ -513,7 +543,7 @@ async function classifyImage(file) {
 		throw Object.assign(new Error(`Failed to parse classification JSON: ${e.message}`), { statusCode: 502 });
 	}
 
-	const VALID_TYPES = ['bolPhoto', 'markerPhoto', 'cargoPhoto'];
+	const VALID_TYPES = ['bolPhoto', 'markerPhoto', 'cargoPhoto', 'sealPhoto'];
 	if (!VALID_TYPES.includes(parsed.imageType)) {
 		throw Object.assign(
 			new Error(`Claude returned unknown image type: "${parsed.imageType}"`),
@@ -538,26 +568,28 @@ async function classifyAndAnalyzeAll(files) {
 		}),
 	);
  
-	const groups = { bolPhoto: [], markerPhoto: [], cargoPhoto: [] };
+	const groups = { bolPhoto: [], markerPhoto: [], cargoPhoto: [], sealPhoto: [] };
 	for (const { file, imageType } of classifiedFiles) {
 		groups[imageType].push(file);
 	}
  
-	const [helperResult, bolResults, markerResults, cargoResults] = await Promise.all([
+	const [helperResult, bolResults, markerResults, cargoResults, sealResults] = await Promise.all([
 		groups.bolPhoto.length ? bolHelper(groups.bolPhoto) : Promise.resolve({ isHazmat: true, weights: [] }),
 		groups.bolPhoto.length    ? analyzeImageWithClaude(groups.bolPhoto,    'bolPhoto')    : Promise.resolve([]),
 		groups.markerPhoto.length ? analyzeImageWithClaude(groups.markerPhoto, 'markerPhoto') : Promise.resolve([]),
 		groups.cargoPhoto.length  ? analyzeImageWithClaude(groups.cargoPhoto,  'cargoPhoto')  : Promise.resolve([]),
+		groups.sealPhoto.length   ? analyzeImageWithClaude(groups.sealPhoto,   'sealPhoto')   : Promise.resolve([]),
 	]);
  
 	// Return classifiedFiles so createAudit can tag each image URL with its slot type
-	return { bolResults, markerResults, cargoResults, classifiedFiles, isGlobalHazmat: helperResult.isHazmat, bolWeights: helperResult.weights };
+	return { bolResults, markerResults, cargoResults, sealResults, classifiedFiles, isGlobalHazmat: helperResult.isHazmat, bolWeights: helperResult.weights };
 }
 
 const IMAGE_TYPE_TO_SLOT = {
 	bolPhoto:    'bol',
 	markerPhoto: 'placard',
 	cargoPhoto:  'cargo',
+	sealPhoto:   'seal',
 };
 
 // ==========================
@@ -698,7 +730,26 @@ function recommendPlacards(classes, bolWeights) {
 	return recommendations;
 }
 
-function runAudit(bolResults, markerResults, cargoResults, isGlobalHazmat, bolWeights/*, exterierResults*/) {
+function getLevenshteinDistance(a, b) {
+    if (a.length === 0) return b.length;
+    if (b.length === 0) return a.length;
+    const matrix = Array(b.length + 1).fill(null).map(() => Array(a.length + 1).fill(null));
+    for (let i = 0; i <= a.length; i += 1) matrix[0][i] = i;
+    for (let j = 0; j <= b.length; j += 1) matrix[j][0] = j;
+    for (let j = 1; j <= b.length; j += 1) {
+        for (let i = 1; i <= a.length; i += 1) {
+            const indicator = a[i - 1] === b[j - 1] ? 0 : 1;
+            matrix[j][i] = Math.min(
+                matrix[j][i - 1] + 1, 
+                matrix[j - 1][i] + 1, 
+                matrix[j - 1][i - 1] + indicator
+            );
+        }
+    }
+    return matrix[b.length][a.length];
+}
+
+function runAudit(bolResults, markerResults, cargoResults, isGlobalHazmat, bolWeights, sealResults) {
 	const issues = [];
  
 	// Convenience: get mainValue safely
@@ -1336,6 +1387,68 @@ function runAudit(bolResults, markerResults, cargoResults, isGlobalHazmat, bolWe
 	}
  
 	// ─────────────────────────────────────────────
+	// SEAL VALIDATION CROSS-MATCH
+	// ─────────────────────────────────────────────
+	const rawBolSeals = [...new Set(bolResults.map((b) => v(b.extracted?.sealNumber)).filter(Boolean))];
+	const bolSeals = rawBolSeals.flatMap(sealStr => 
+		String(sealStr)
+			.split(/[\/,|;\\]+/)
+			.map(s => s.trim())
+			.filter(Boolean)
+	);
+
+	const photoSeals = [...new Set(sealResults.map((s) => v(s.extracted?.sealNumber)).filter(Boolean))];
+
+	if (bolSeals.length > 0 && photoSeals.length > 0) {
+		for (const pSeal of photoSeals) { 
+			const cleanP = String(pSeal).replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
+			
+			let bestMatchDistance = Infinity;
+			let bestBolSeal = null;
+
+			for (const bSeal of bolSeals) { 
+				const cleanB = String(bSeal).replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
+				const dist = getLevenshteinDistance(cleanP, cleanB);
+				
+				if (dist < bestMatchDistance) {
+					bestMatchDistance = dist;
+					bestBolSeal = bSeal; 
+				}
+			}
+
+			if (bestMatchDistance === 0) {
+            } else if (bestMatchDistance <= 2) {
+				addIssue({
+					source: 'CROSS',
+					severity: 'WARNING',
+					cfr: 'Security / Chain of Custody',
+					check: 'Seal Number Partial Match',
+					message: `Seal on trailer (${pSeal}) closely resembles BOL record (${bestBolSeal}), but differs slightly. Likely an OCR read error. Please verify manually.`,
+					fix: 'Manually confirm the seal number matches the BOL.'
+				});
+			} else {
+				addIssue({
+					source: 'CROSS',
+					severity: 'CRITICAL',
+					cfr: 'Security / Chain of Custody',
+					check: 'Seal Number Mismatch',
+					message: `Seal number on trailer (${pSeal}) does NOT match any seal/reference numbers declared on the BOL (${bolSeals.join(', ')}).`,
+					fix: 'Investigate potential chain of custody breach. Do not accept the load without carrier and shipper authorization.'
+				});
+			}
+		}
+	} else if (photoSeals.length > 0 && bolSeals.length === 0) {
+		addIssue({
+			source: 'BOL',
+			severity: 'WARNING',
+			cfr: 'Security / Chain of Custody',
+			check: 'Missing BOL Seal',
+			message: `A security seal (${photoSeals.join(', ')}) is present on the trailer, but no seal number was found in the BOL documents.`,
+			fix: 'Verify with the shipper if the seal number should have been documented on the Bill of Lading.',
+		});
+	}
+
+	// ─────────────────────────────────────────────
 	// 8. OTHER NOTES from each slot
 	// ─────────────────────────────────────────────
  
@@ -1350,6 +1463,7 @@ function runAudit(bolResults, markerResults, cargoResults, isGlobalHazmat, bolWe
 	for (const bol    of bolResults)    for (const note of (bol.extracted?.otherNotes    ?? [])) pushNote('BOL',     note);
 	for (const marker of markerResults) for (const note of (marker.extracted?.otherNotes ?? [])) pushNote('PLACARD', note);
 	for (const cargo  of cargoResults)  for (const note of (cargo.extracted?.otherNotes  ?? [])) pushNote('CARGO',   note);
+	for (const seal of sealResults) for (const note of (seal.extracted?.otherNotes ?? [])) pushNote('SEAL', note);
  
 	// ─────────────────────────────────────────────
 	// 9. SCORING & SUMMARY
@@ -1479,9 +1593,9 @@ export async function createAudit(request, reply) {
 		return { id, url: data.publicUrl, mimetype: MIME_MAP[ext] ?? 'image/jpeg' };
 	});
  
-	let bolResults, markerResults, cargoResults, classifiedFiles, isGlobalHazmat, bolWeights;
+	let bolResults, markerResults, cargoResults, sealResults, classifiedFiles, isGlobalHazmat, bolWeights;
 	try {
-		({ bolResults, markerResults, cargoResults, classifiedFiles, isGlobalHazmat, bolWeights } = await classifyAndAnalyzeAll(files));
+		({ bolResults, markerResults, cargoResults, classifiedFiles, isGlobalHazmat, bolWeights, sealResults } = await classifyAndAnalyzeAll(files));
 	} catch (err) {
 		return reply.code(err.statusCode ?? 502).send({ error: err.message });
 	}
@@ -1501,9 +1615,9 @@ export async function createAudit(request, reply) {
 		});
 	}
 
-	const audit = runAudit(bolResults, markerResults, cargoResults, isGlobalHazmat, bolWeights);
+	const audit = runAudit(bolResults, markerResults, cargoResults, isGlobalHazmat, bolWeights, sealResults);
  
-	const auditResponse = { bol: bolResults, marker: markerResults, cargo: cargoResults, audit };
+	const auditResponse = { bol: bolResults, marker: markerResults, cargo: cargoResults, seal: sealResults, audit };
  
 	// Each image stored with its detected slot type so the UI can show them per-section
 	const auditImages = classifiedFiles.map(({ file, imageType }) => ({
