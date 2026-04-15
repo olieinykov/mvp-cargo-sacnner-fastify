@@ -76,7 +76,12 @@ function buildSystemPrompt(imageType) {
             '- Act as a literal text scanner. DO NOT use your internal hazmat database. DO NOT autocomplete or guess.\n' +
             '- Find the letters "UN" or "NA" in the description. Extract EXACTLY the 4 digits physically printed immediately after them.\n' +
             '- NEVER alter the printed UN number to match the Proper Shipping Name.\n' +
-            '- Hazard Class: Extract ONLY the number (e.g., "8", "3") printed in the hazmat description. COMPLETELY IGNORE the right-hand table column labeled "Class or Rate".\n\n' +
+            '- Hazard Class: Extract the primary hazard class AND any subsidiary classes in parentheses. ' +
+			'FORMATTING RULE: You MUST remove any commas or spaces immediately preceding the parenthesis. ' +
+			'Always format strictly as "Primary(Subsidiary)", for example, convert "5.2,(8)" or "5.1, (8)" to exactly "5.2(8)" or "5.1(8)". ' +
+			'CRITICAL SEPARATION RULE: If the Packing Group is printed right next to the class (e.g., "8,II" or "5.1(8),II"), ' +
+			'extract ONLY the hazard class portion into this field and put the Roman numerals into the packingGroup field. ' +
+			'NEVER concatenate classes from multiple different cargo rows into a single string.\n\n' +
             'STEP 2: EXTRACT REMAINING FIELDS\n' +
             '- Packing Group: Roman numerals (I, II, III) where required.\n' +
             '- HM Column Marking: "X" or "RQ" marking in hazardous material column.\n' +
@@ -86,14 +91,12 @@ function buildSystemPrompt(imageType) {
             '- properShippingName: Extract the EXACT text of the Proper Shipping Name printed on the document (e.g., "TOLUENE", "COATING SOLUTION", "CORROSIVE LIQUID, N.O.S."). Do not alter, guess, or abbreviate the text.\n' +
             '- entrySequenceCompliant: true if entry follows DOT order (name → class → UN → PG). false if order differs. null if uncertain.\n' +
             '- sealNumber: Look for "SEAL#", "Seal Number", or handwritten seal numbers. Extract the exact alphanumeric string. null if not found.\n' +
-			'- hmColumnMarked: Search the ENTIRE document — not just the table column — for an "X" or "RQ" ' +
-            'associated with the hazmat line item. On many BOL formats the HM column is merged with other columns ' +
-            'or the marking may appear inline within the description text itself, near the UN number, ' +
-            'or as a standalone character adjacent to the cargo line. ' +
-            'Set true if ANY "X" or "RQ" is found anywhere on the hazmat line row or description block.\n' +
-            'Check if an "X" appears in that column ON THE DATA ROW (not the header). ' +
-            'The column is often very narrow and placed between package count and units columns. ' +
-            'true if X or RQ found on any hazmat data row in that column.\n' +
+			'- hmColumnMarked: STRICT RULE. Search ONLY the data row under the HM column. ' +
+			'If the cell on the data row is visually blank or empty, you MUST return false. ' +
+			'DO NOT count the "X" in the column header "HM(X)". ' +
+			'DO NOT count the letter "X" inside normal words like "TX", "BOX", or "MEXICO". ' +
+			'Only return true if a standalone "X" or "RQ" is intentionally entered for that specific cargo line. ' +
+			'Set true if ANY "X" or "RQ" is found specifically on the hazmat line row data, NOT the header.\n' +
             'MULTIPLE HAZMAT ENTRIES:\n' +
             '- If this document shows TWO OR MORE distinct hazmat line items, return a SEPARATE object for each.\n' +
             '- PAIRING RULE: pair each UN number with its corresponding hazard class and packing group from that specific line item.\n\n' +
@@ -103,7 +106,9 @@ function buildSystemPrompt(imageType) {
             '- TWO OR MORE hazmat entries → JSON ARRAY of objects, one per entry.\n' +
             '- STRICT SCHEMA RULE: The "extracted" field MUST NEVER BE AN ARRAY. If you have multiple entries, return a ROOT array of objects, like this:\n' +
             '  [ { "slotName": "bol", "extracted": {...} }, { "slotName": "bol", "extracted": {...} } ]\n' +
-            '- Never use comma-separated UN numbers or hazard classes inside a single object.\n\n' +
+            '- Never use comma-separated UN numbers or hazard classes inside a single object.\n' +
+			'- TOKEN LIMIT PREVENTION: Keep "meaning" strings concise but highly specific (approx 10-15 words). Include exact evidence (e.g., "Standalone X found in HM column for UN1866"). DO NOT use conversational filler phrases like "Extracted exactly as printed".\n' +
+            '- Leave "otherNotes" empty [] UNLESS there is a critical DOT violation not covered by other fields. Do not extract Qty or Gross Weight into notes.\n\n' +
             'Respond ONLY with this JSON shape:\n' +
             '{\n' +
             '  "slotName": "bol",\n' +
@@ -159,7 +164,8 @@ function buildSystemPrompt(imageType) {
 			'    },\n' +
 			'    "confidence": { "overall": 0.0, "fields": {} },\n' +
 			'  "notes": []\n' +
-			'}'
+			'}\n' +
+			'DO NOT include any reasoning, explanations, preamble, or postamble. Output ONLY raw JSON.'
 		);
 	}
 
@@ -287,7 +293,7 @@ async function bolHelper(bolFiles) {
 						...imageContents,
 						{ type: 'text', text: 'Review all pages, determine if hazmat is present, and extract the weights.' },
 					],
-				},
+				}
 			],
 		});
 
@@ -373,7 +379,10 @@ async function callClaude(systemPrompt, file, userText) {
 								url: file.url
 							},
 						},
-						{ type: 'text', text: userText },
+						{ 
+							type: 'text', 
+							text: userText + '\n\nCRITICAL: Respond STRICTLY with raw JSON. Start your response immediately with { or [. DO NOT wrap in ```json markdown. NO explanations, NO preamble, NO conversational text.' 
+						},
 					],
 				},
 			],
@@ -389,16 +398,13 @@ async function callClaude(systemPrompt, file, userText) {
 
 	let parsed;
 	try {
-		// Strip markdown code fences if present
-		let clean = textBlock.text.replace(/```json\s*|```\s*/g, '').trim();
-
-		// Claude sometimes wraps the JSON in explanatory text — extract the first {...} or [...]
-		if (!clean.startsWith('{') && !clean.startsWith('[')) {
-			const objMatch = clean.match(/(\{[\s\S]*\}|\[[\s\S]*\])/);
-			if (objMatch) clean = objMatch[1];
+		const objMatch = textBlock.text.match(/(\{[\s\S]*\}|\[[\s\S]*\])/);
+		
+		if (!objMatch) {
+			throw new Error('No JSON structure found in response.');
 		}
-
-		parsed = JSON.parse(clean);
+		
+		parsed = JSON.parse(objMatch[1]);
 	} catch (parseErr) {
 		console.error('[callClaude] JSON parse error:', parseErr.message);
 		console.error('[callClaude] Raw Claude response:\n', textBlock.text);
@@ -1057,8 +1063,19 @@ function runAudit(bolResults, markerResults, cargoResults, isGlobalHazmat, bolWe
 	const noBolHasPG = bolResults.every((bol) => {
 		const bolExt      = bol.extracted ?? {};
 		const bolClsArr   = parseClasses(v(bolExt.hazardClass));
+		const bolUNs      = parseUNs(v(bolExt.unNumber));
 		// BOL is PG-exempt if ANY of its classes is Class 2.x or Class 7
-		const isPG_exempt = bolClsArr.some((c) => c.startsWith('2') || c === '7');
+		let isPG_exempt = bolClsArr.some((c) => c.startsWith('2') || c === '7');
+		if (!isPG_exempt && bolUNs.length > 0) {
+			isPG_exempt = bolUNs.some((unNum) => {
+				const cleanUnNum = String(unNum).replace(/\D/g, '');
+				const rawEntry = hazmatTable?.[`UN${cleanUnNum}`];
+				if (!rawEntry) return false;
+
+				const entryList = Array.isArray(rawEntry) ? rawEntry : [rawEntry];
+				return entryList.some(e => e.expectedData?.packingGroup == null);
+			});
+		}
 		if (isPG_exempt) return false; // exempt BOL — does not count as "missing"
 		const pgValue = v(bolExt.packingGroup);
 		return !pgValue || String(pgValue).trim() === '—' || String(pgValue).trim() === '-';
@@ -1137,7 +1154,7 @@ function runAudit(bolResults, markerResults, cargoResults, isGlobalHazmat, bolWe
 			const required = isPlacardsRequired(bc, bolWeights);
 			if (!required) continue; // weight threshold not met — placard not mandatory
  
-			if (placardClasses.length > 0 && !placardClasses.some((pc) => isClassMatch(bc, pc))) {
+			if (!placardClasses.some((pc) => isClassMatch(bc, pc))) {
 				addIssue({
 					source: 'CROSS',
 					severity: 'CRITICAL',
@@ -1168,7 +1185,7 @@ function runAudit(bolResults, markerResults, cargoResults, isGlobalHazmat, bolWe
 		for (const bu of bolUNs) {
 			if (!isUNNumberRequiredOnPlacard(bu, bolWeights)) continue; // not required
  
-			if (placardUNs.length > 0 && !placardUNs.includes(bu)) {
+			if (!placardUNs.includes(bu)) {
 				addIssue({
 					source: 'CROSS',
 					severity: 'CRITICAL',
@@ -1192,7 +1209,19 @@ function runAudit(bolResults, markerResults, cargoResults, isGlobalHazmat, bolWe
 					fix: `Remove or replace the incorrect placard, or update the BOL to include UN${pu}.`,
 				});
 			}
+			if (!isUNNumberRequiredOnPlacard(pu, bolWeights)) {
+                addIssue({
+                    source: 'CROSS',
+                    severity: 'MAJOR',
+                    cfr: '49 CFR 172.336(b)',
+                    check: 'Prohibited UN Marking',
+                    message: `UN${pu} is displayed on the exterior placard, but the shipment weight does not meet the 8,820 lbs threshold required to display identification numbers for non-bulk packages.`,
+                    fix: `Remove the UN number panel from the placard, or replace it with a standard word placard (e.g., FLAMMABLE).`,
+                });
+       		}
 		}
+
+		
 	}
  
 	// ─────────────────────────────────────────────
@@ -1257,17 +1286,20 @@ function runAudit(bolResults, markerResults, cargoResults, isGlobalHazmat, bolWe
 		}
 	}
  
-	// Package labels check — issue only if NO cargo image has labels present
-	const noCargoHasLabels = cargoResults.every((cargo) => !v(cargo.extracted?.packageLabelsPresent));
-	if (noCargoHasLabels) {
-		addIssue({
-			source: 'CARGO',
-			severity: 'CRITICAL',
-			cfr: '49 CFR 172.400',
-			check: 'Package Labels',
-			message: 'Required hazard class labels are not visible on cargo packages in any provided photo.',
-			fix: 'Affix the correct hazard class label(s) to each package as required by 49 CFR 172.400.',
-		});
+	// Package labels check — issue only if it's a Hazmat load AND we have cargo photos, 
+	// but NO cargo image has labels present
+	if (isGlobalHazmat && cargoResults.length > 0) {
+		const noCargoHasLabels = cargoResults.every((cargo) => !v(cargo.extracted?.packageLabelsPresent));
+		if (noCargoHasLabels) {
+			addIssue({
+				source: 'CARGO',
+				severity: 'CRITICAL',
+				cfr: '49 CFR 172.400',
+				check: 'Package Labels',
+				message: 'Required hazard class labels are not visible on cargo packages in any provided photo.',
+				fix: 'Affix the correct hazard class label(s) to each package as required by 49 CFR 172.400.',
+			});
+		}
 	}
  
 	// ─────────────────────────────────────────────
