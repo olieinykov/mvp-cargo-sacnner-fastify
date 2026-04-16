@@ -120,7 +120,11 @@ const isUNNumberRequiredOnPlacard = (unNumber, bolWeights) => {
 	if (rule?.unNumber === 'ALWAYS_PIH' || rule?.unNumber === 'ALWAYS_PIH_OR_LARGE_SINGLE') {
 		return true;
 	}
- 
+
+	if (entry.isBulk === true) {
+		return true;
+	}
+
 	// BULK_OR_LARGE_SINGLE: only require UN# if this is the sole hazmat UN and weight > threshold
 	const allHazmatEntries = bolWeights.filter((e) => String(e.unNumber).replace(/\D/g, '').length === 4);
 	if (allHazmatEntries.length === 1 && (Number(entry.weight) || 0) > LARGE_SINGLE_UN_THRESHOLD_LBS) {

@@ -101,7 +101,10 @@ export async function createAudit(request, reply) {
 
 	if (bolWeights && bolWeights.length > 0) {
 		const formattedWeightsStr = bolWeights
-			.map(w => `UN: ${String(w.unNumber).replace(/\D/g, '')} | Weight: ${w.weight} lbs;`)
+			.map(w => {
+				const packType = w.isBulk ? 'Bulk (IBC/Tank)' : 'Non-Bulk';
+				return `UN: ${String(w.unNumber).replace(/\D/g, '')} | Weight: ${w.weight} lbs | Type: ${packType};`;
+			})
 			.join('\n');
 
 		bolResults.forEach(bol => {

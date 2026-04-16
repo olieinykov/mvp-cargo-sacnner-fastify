@@ -230,6 +230,7 @@ const bolHelper = async (bolFiles) => {
 		'2. weights: An array with one entry per UN number. For each entry extract:\n' +
 		'   - unNumber: 4-digit UN/NA number as a string (digits only, no "UN" prefix), e.g. "1203".\n' +
 		'   - hazardClass: the hazard class printed on that same BOL line item, e.g. "3", "8", "2.1". null if not found.\n' +
+		'   - isBulk: STRICT BOOLEAN. Look at the "Pack Type" or package description column. If it contains "IBC", "Tote", "Tank", or indicates capacity > 119 gallons, return true. If it contains "DRM" (Drum), "CYL" (Cylinder), "BOX", "PLT", or is unspecified, return false.\n' +
 		'   - weight: total GROSS weight in LBS for that UN number. ' +
 		'ALWAYS prioritize the GROSS weight (e.g., "Gross Wgt Lbs", "Gross", or "Total Weight") over Net Weight. ' +
 		'If weight is in KG, multiply by 2.20462 to get LBS. ' +
@@ -238,7 +239,7 @@ const bolHelper = async (bolFiles) => {
 		'NO explanations, NO markdown, NO code fences, NO preamble. ' +
 		'Your entire response must start with { and end with }.\n\n' +
 		'Required format:\n' +
-		'{"isHazmat": true|false, "weights": [{"unNumber": "1203", "hazardClass": "3", "weight": 45000}]}';
+		'{"isHazmat": true|false, "weights": [{"unNumber": "1203", "hazardClass": "3", "weight": 45000, "isBulk": true|false}]}';
 
 	try {
 		const response = await getClient().messages.create({
