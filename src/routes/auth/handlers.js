@@ -3,26 +3,7 @@ import { db } from '../../db/connection.js';
 import { users, companies, invitations } from '../../db/schema.js';
 import { eq, and } from 'drizzle-orm';
 import { randomBytes } from 'node:crypto';
-
-// ==========================
-// Supabase client
-// ==========================
-
-const getSupabase = () => {
-	const url = process.env.SUPABASE_URL;
-	const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
-
-	if (!url || !key) {
-		throw Object.assign(
-			new Error('SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY env vars are required.'),
-			{ statusCode: 500 },
-		);
-	}
-
-	return createClient(url, key, {
-		auth: { autoRefreshToken: false, persistSession: false },
-	});
-};
+import { getSupabase } from '../../lib/supabase.js';
 
 // ==========================
 // POST /auth/signUp-invite
@@ -35,7 +16,7 @@ export async function signUpByInvite(request, reply) {
 		return reply.code(400).send({ error: 'Invite token is required.' });
 	}
 
-	const supabase = getSupabase();
+	const { client: supabase } = getSupabase();
 
 	const [found] = await db
 		.select()
@@ -142,7 +123,7 @@ export async function signUpAdmin(request, reply) {
 		auth: { autoRefreshToken: false, persistSession: false },
 	});
 
-	const adminSupabase = getSupabase();
+	const { client: adminSupabase } = getSupabase();
 
 	const { data: authData, error: authError } = await anonSupabase.auth.signUp({
 		email,
@@ -222,7 +203,7 @@ export async function signUpAdmin(request, reply) {
 export async function signIn(request, reply) {
 	const { email, password } = request.body;
 
-	const supabase = getSupabase();
+	const { client: supabase } = getSupabase();
 
 	const { data, error } = await supabase.auth.signInWithPassword({ email, password });
 
@@ -287,7 +268,7 @@ export async function createInvitation(request, reply) {
 		return reply.code(401).send({ error: 'Missing Authorization header.' });
 	}
 
-	const supabase = getSupabase();
+	const { client: supabase } = getSupabase();
 
 	const { data: { user: authUser }, error: userError } = await supabase.auth.getUser(token);
 
@@ -447,7 +428,7 @@ export async function getCompanyUsers(request, reply) {
 		return reply.code(401).send({ error: 'Missing Authorization header.' });
 	}
  
-	const supabase = getSupabase();
+	const { client: supabase } = getSupabase();
  
 	const { data: { user: authUser }, error: userError } = await supabase.auth.getUser(token);
  
@@ -493,7 +474,7 @@ export async function getMe(request, reply) {
 		return reply.code(401).send({ error: 'Missing Authorization header.' });
 	}
 
-	const supabase = getSupabase();
+	const { client: supabase } = getSupabase();
 
 	const { data: { user: authUser }, error: userError } = await supabase.auth.getUser(token);
 
@@ -552,7 +533,7 @@ export async function requestPasswordReset(request, reply) {
 		return reply.code(404).send({ error: 'User with this email does not exist.' });
 	}
 
-	const supabase = getSupabase();
+	const { client: supabase } = getSupabase();
 	
 	const appUrl = 'https://mvp-cargo-sacnner-fe.vercel.app';
 	const resetLink = `${appUrl}/update-password`;
@@ -580,7 +561,7 @@ export async function updatePassword(request, reply) {
 		return reply.code(401).send({ error: 'Missing Authorization header.' });
 	}
 
-	const supabase = getSupabase();
+	const { client: supabase } = getSupabase();
 
 	const { data: { user }, error: userError } = await supabase.auth.getUser(token);
 
@@ -609,7 +590,7 @@ export async function getPendingInvitations(request, reply) {
 
 	if (!token) return reply.code(401).send({ error: 'Missing Authorization header.' });
 
-	const supabase = getSupabase();
+	const { client: supabase } = getSupabase();
 	const { data: { user: authUser }, error: userError } = await supabase.auth.getUser(token);
 
 	if (userError || !authUser) return reply.code(401).send({ error: 'Invalid or expired token.' });
@@ -650,7 +631,7 @@ export async function cancelInvitation(request, reply) {
 
 	if (!token) return reply.code(401).send({ error: 'Missing Authorization header.' });
 
-	const supabase = getSupabase();
+	const { client: supabase } = getSupabase();
 	const { data: { user: authUser }, error: userError } = await supabase.auth.getUser(token);
 
 	if (userError || !authUser) return reply.code(401).send({ error: 'Invalid or expired token.' });
@@ -690,7 +671,7 @@ export async function resendInvitation(request, reply) {
 
 	if (!token) return reply.code(401).send({ error: 'Missing Authorization header.' });
 
-	const supabase = getSupabase();
+	const { client: supabase } = getSupabase();
 	const { data: { user: authUser }, error: userError } = await supabase.auth.getUser(token);
 
 	if (userError || !authUser) return reply.code(401).send({ error: 'Invalid or expired token.' });
@@ -754,7 +735,7 @@ export async function updateUserRole(request, reply) {
 
 	if (!token) return reply.code(401).send({ error: 'Missing Authorization header.' });
 
-	const supabase = getSupabase();
+	const { client: supabase } = getSupabase();
 	const { data: { user: authUser }, error: userError } = await supabase.auth.getUser(token);
 
 	if (userError || !authUser) return reply.code(401).send({ error: 'Invalid or expired token.' });
