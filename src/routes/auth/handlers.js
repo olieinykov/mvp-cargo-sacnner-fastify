@@ -223,6 +223,10 @@ export async function signIn(request, reply) {
 		.where(eq(users.id, authUser.id))
 		.limit(1);
 
+	if (profile && profile.isActive === false) {
+		return reply.code(403).send({ error: 'Account is deactivated. Please contact your administrator.' });
+	}
+
 	if (profile && !profile.isEmailConfirmed) {
 		await db
 			.update(users)
@@ -431,7 +435,7 @@ export async function getCompanyUsers(request, reply) {
 	const { client: supabase } = getSupabase();
  
 	const { data: { user: authUser }, error: userError } = await supabase.auth.getUser(token);
- 
+
 	if (userError || !authUser) {
 		return reply.code(401).send({ error: 'Invalid or expired token.' });
 	}
@@ -445,7 +449,11 @@ export async function getCompanyUsers(request, reply) {
 	if (!requester) {
 		return reply.code(403).send({ error: 'User profile not found.' });
 	}
- 
+	
+	if (requester.isActive === false) {
+		return reply.code(401).send({ error: 'Account deactivated.' });
+	}
+
 	if (requester.role !== 'admin') {
 		return reply.code(403).send({ error: 'Admin access required.' });
 	}
@@ -492,6 +500,7 @@ export async function getMe(request, reply) {
 			companyId:        users.companyId,
 			registrationData: users.registrationData,
 			isEmailConfirmed: users.isEmailConfirmed,
+			isActive: 		  users.isActive,
 			companyName:      companies.name,
 		})
 		.from(users)
@@ -501,6 +510,10 @@ export async function getMe(request, reply) {
 
 	if (!result) {
 		return reply.code(404).send({ error: 'User profile not found.' });
+	}
+
+	if (result.isActive === false) {
+		return reply.code(401).send({ error: 'Account deactivated' });
 	}
 
 	return reply.send({
@@ -781,6 +794,71 @@ export async function updateUserRole(request, reply) {
 			id: updatedUser.id,
 			email: updatedUser.email,
 			role: updatedUser.role,
+		}
+	});
+}
+
+// ==========================
+// PATCH /auth/users/:userId/status
+// ==========================
+ 
+export async function updateUserStatus(request, reply) {
+	const { userId } = request.params;
+	const { isActive } = request.body;
+	const authHeader = request.headers.authorization ?? '';
+	const token = authHeader.replace(/^Bearer\s+/i, '').trim();
+ 
+	if (!token) return reply.code(401).send({ error: 'Missing Authorization header.' });
+ 
+	const { client: supabase } = getSupabase();
+	const { data: { user: authUser }, error: userError } = await supabase.auth.getUser(token);
+ 
+	if (userError || !authUser) return reply.code(401).send({ error: 'Invalid or expired token.' });
+ 
+	const [admin] = await db.select().from(users).where(eq(users.id, authUser.id)).limit(1);
+ 
+	if (!admin || admin.role !== 'admin' || !admin.companyId) {
+		return reply.code(403).send({ error: 'Admin access required.' });
+	}
+ 
+	if (admin.id === userId) {
+		return reply.code(400).send({ error: 'You cannot change your own status.' });
+	}
+ 
+	const [targetUser] = await db
+		.select({ id: users.id, isActive: users.isActive })
+		.from(users)
+		.where(
+			and(
+				eq(users.id, userId),
+				eq(users.companyId, admin.companyId)
+			)
+		)
+		.limit(1);
+ 
+	if (!targetUser) {
+		return reply.code(404).send({ error: 'User not found in your company.' });
+	}
+ 
+	if (targetUser.isActive === isActive) {
+		return reply.code(400).send({
+			error: `User is already ${isActive ? 'active' : 'inactive'}.`,
+		});
+	}
+ 
+	const [updatedUser] = await db
+		.update(users)
+		.set({ isActive })
+		.where(eq(users.id, userId))
+		.returning();
+ 
+	return reply.send({
+		message: `User ${isActive ? 'activated' : 'deactivated'} successfully.`,
+		user: {
+			id:       updatedUser.id,
+			email:    updatedUser.email,
+			role:     updatedUser.role,
+			isActive: updatedUser.isActive,
 		}
 	});
 }

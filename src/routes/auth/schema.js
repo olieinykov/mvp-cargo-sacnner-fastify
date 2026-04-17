@@ -254,13 +254,14 @@ export const getCompanyUsersSchema = {
 					items: {
 						type: 'object',
 						properties: {
-							id:        { type: 'string', format: 'uuid' },
-							email:     { type: 'string', format: 'email' },
-							firstName: { type: 'string' },
-							lastName:  { type: 'string' },
-							role:      { type: 'string' },
-							companyId: { type: 'string', format: 'uuid', nullable: true },
+							id:               { type: 'string', format: 'uuid' },
+							email:            { type: 'string', format: 'email' },
+							firstName:        { type: 'string' },
+							lastName:         { type: 'string' },
+							role:             { type: 'string' },
+							companyId:        { type: 'string', format: 'uuid', nullable: true },
 							registrationData: { type: 'string' },
+							isActive:         { type: 'boolean' },
 						},
 					},
 				},
@@ -308,6 +309,7 @@ export const getMeSchema = {
 				companyId:        { type: 'string', format: 'uuid', nullable: true },
 				registrationData: { type: 'string', format: 'date-time' },
 				isEmailConfirmed: { type: 'boolean' },
+				isActive:         { type: 'boolean' },
 				companyName:      { type: 'string' },
 			},
 		},
@@ -492,12 +494,67 @@ export const updateUserRoleSchema = {
 				user: {
 					type: 'object',
 					properties: {
-						id: { type: 'string' },
-						email: { type: 'string' },
-						role: { type: 'string' },
+						id:       { type: 'string' },
+						email:    { type: 'string' },
+						role:     { type: 'string' },
+						isActive: { type: 'boolean' },
 					}
 				}
 			},
+		},
+	},
+};
+
+// ─── PATCH /auth/users/:userId/status ─────────────────────────────────────────
+
+export const updateUserStatusSchema = {
+	tags: ['Auth', 'Admin'],
+	summary: 'Activate or deactivate a user',
+	description: 'Admin-only. Sets the `isActive` flag for a user within the same company. Cannot be used on yourself.',
+	headers: {
+		type: 'object',
+		required: ['authorization'],
+		properties: { authorization: { type: 'string' } },
+	},
+	params: {
+		type: 'object',
+		required: ['userId'],
+		properties: { userId: { type: 'string', format: 'uuid' } },
+	},
+	body: {
+		type: 'object',
+		required: ['isActive'],
+		properties: {
+			isActive: { type: 'boolean' },
+		},
+	},
+	response: {
+		200: {
+			type: 'object',
+			properties: {
+				message: { type: 'string' },
+				user: {
+					type: 'object',
+					properties: {
+						id:       { type: 'string' },
+						email:    { type: 'string' },
+						role:     { type: 'string' },
+						isActive: { type: 'boolean' },
+					}
+				}
+			},
+		},
+		400: {
+			type: 'object',
+			properties: { error: { type: 'string' } },
+		},
+		403: {
+			type: 'object',
+			properties: { error: { type: 'string' } },
+		},
+		404: {
+			type: 'object',
+			properties: { error: { type: 'string' } },
 		},
 	},
 };

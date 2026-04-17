@@ -47,5 +47,6 @@ export const users = pgTable('users', {
   email: text('email').notNull().unique(),
   role: memberRoleEnum('role').notNull().default('user'),
   registrationData: timestamp('registration_data').defaultNow().notNull(),
-  isEmailConfirmed: boolean('is_email_confirmed').notNull().default(false)
+  isEmailConfirmed: boolean('is_email_confirmed').notNull().default(false),
+  isActive: boolean('is_active').notNull().default(false)
 });

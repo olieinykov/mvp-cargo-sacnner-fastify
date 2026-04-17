@@ -1,5 +1,5 @@
-import { signIn, createInvitation, getInviteInfo, getCompanyUsers, signUpByInvite, signUpAdmin, getMe, requestPasswordReset, updatePassword, getPendingInvitations, cancelInvitation, resendInvitation, updateUserRole } from './handlers.js';
-import { signInSchema, createInvitationSchema, getInviteInfoSchema, getCompanyUsersSchema, signUpByInviteSchema, signUpAdminSchema, getMeSchema, requestPasswordResetSchema, updatePasswordSchema, getPendingInvitationsSchema, cancelInvitationSchema, resendInvitationSchema, updateUserRoleSchema } from './schema.js';
+import { signIn, createInvitation, getInviteInfo, getCompanyUsers, signUpByInvite, signUpAdmin, getMe, requestPasswordReset, updatePassword, getPendingInvitations, cancelInvitation, resendInvitation, updateUserRole, updateUserStatus } from './handlers.js';
+import { signInSchema, createInvitationSchema, getInviteInfoSchema, getCompanyUsersSchema, signUpByInviteSchema, signUpAdminSchema, getMeSchema, requestPasswordResetSchema, updatePasswordSchema, getPendingInvitationsSchema, cancelInvitationSchema, resendInvitationSchema, updateUserRoleSchema, updateUserStatusSchema } from './schema.js';
 
 const routes = async (fastify) => {
 	fastify.post('/sign-up-invite', {
@@ -65,6 +65,11 @@ const routes = async (fastify) => {
 	fastify.patch('/users/:userId/role', {
 		handler: updateUserRole,
 		schema:  updateUserRoleSchema,
+	});
+
+	fastify.patch('/users/:userId/status', {
+		handler: updateUserStatus,
+		schema:  updateUserStatusSchema,
 	});
 };
 
