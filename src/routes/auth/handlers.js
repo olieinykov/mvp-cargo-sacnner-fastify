@@ -46,18 +46,28 @@ export async function signUpByInvite(request, reply) {
 		return reply.code(400).send({ error: 'Email does not match the invitation.' });
 	}
 
-	// Create Supabase Auth user
-	const { data: authData, error: authError } = await supabase.auth.admin.createUser({
-		email,
-		password,
+	const { data: { users: authUsers }, error: listError } = await supabase.auth.admin.listUsers();
+
+	if (listError) {
+		return reply.code(500).send({ error: `Auth service error: ${listError.message}` });
+	}
+
+	const authUser = authUsers.find(u => u.email?.toLowerCase() === email.toLowerCase());
+
+	if (!authUser) {
+		return reply.code(404).send({ error: 'User record not found in Auth system. Contact admin.' });
+	}
+
+	const authUserId = authUser.id;
+
+	const { error: updateError } = await supabase.auth.admin.updateUserById(authUserId, {
+		password: password,
 		email_confirm: true,
 	});
 
-	if (authError) {
-		return reply.code(authError.status ?? 400).send({ error: authError.message });
+	if (updateError) {
+		return reply.code(updateError.status ?? 400).send({ error: updateError.message });
 	}
-
-	const authUserId = authData.user.id;
 
 	try {
 		const newUser = await db.transaction(async (tx) => {
@@ -70,6 +80,7 @@ export async function signUpByInvite(request, reply) {
 					lastName,
 					email:     email.toLowerCase(),
 					role:      found.role,
+					isActive:  true,
 				})
 				.returning();
 
@@ -89,11 +100,11 @@ export async function signUpByInvite(request, reply) {
 				lastName:  newUser.lastName,
 				role:      newUser.role,
 				companyId: newUser.companyId,
+				isActive:  newUser.isActive,
 			},
 		});
 	} catch (err) {
-		await supabase.auth.admin.deleteUser(authUserId).catch(() => {});
-		return reply.code(502).send({ error: `Failed to create user profile: ${err.message}` });
+		return reply.code(502).send({ error: `Failed to create database profile: ${err.message}` });
 	}
 }
 
@@ -160,6 +171,7 @@ export async function signUpAdmin(request, reply) {
 					lastName,
 					email:     email.toLowerCase(),
 					role:      'admin',
+					isActive:  true,
 				})
 				.returning();
 
