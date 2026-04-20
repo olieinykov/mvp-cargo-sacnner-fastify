@@ -330,19 +330,6 @@ export async function createInvitation(request, reply) {
 	const inviteToken = randomBytes(32).toString('hex');
 	const expiresAt   = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000); // 7 days
 
-	const [newInvite] = await db
-		.insert(invitations)
-		.values({
-			companyId: admin.companyId,
-			invitedBy: admin.id,
-			email:     email.toLowerCase(),
-			role,
-			token:     inviteToken,
-			expiresAt,
-			status:    'pending',
-		})
-		.returning();
-
 	// Send invite email via Supabase
 	const appUrl     = 'https://mvp-cargo-sacnner-fe.vercel.app';
 	const inviteLink = `${appUrl}/invite?token=${inviteToken}`;
@@ -360,15 +347,32 @@ export async function createInvitation(request, reply) {
 		return reply.code(500).send({ error: `Failed to resend email: ${emailError.message}` });
 	}
 
-	return reply.code(201).send({
-		invitation: {
-			id:        newInvite.id,
-			email:     newInvite.email,
-			role:      newInvite.role,
-			expiresAt: newInvite.expiresAt,
-			inviteLink,
-		},
-	});
+	try{
+		const [newInvite] = await db
+		.insert(invitations)
+		.values({
+			companyId: admin.companyId,
+			invitedBy: admin.id,
+			email:     email.toLowerCase(),
+			role,
+			token:     inviteToken,
+			expiresAt,
+			status:    'pending',
+		})
+		.returning();
+
+		return reply.code(201).send({
+			invitation: {
+				id:        newInvite.id,
+				email:     newInvite.email,
+				role:      newInvite.role,
+				expiresAt: newInvite.expiresAt,
+				inviteLink,
+			},
+		});
+	} catch(e) {
+		return reply.code(500).send({ error: 'Failed to save invitation to database.' });
+	}
 }
 
 // ─── GET /auth/invite/:token ──────────────────────────────────────────────────
