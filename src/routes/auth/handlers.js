@@ -338,13 +338,30 @@ export async function createInvitation(request, reply) {
 		return reply.code(409).send({ error: 'A pending invitation for this email already exists.' });
 	}
 
-	// Create invitation record
+	// Create invitation parameters
 	const inviteToken = randomBytes(32).toString('hex');
 	const expiresAt   = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000); // 7 days
+	const appUrl      = 'https://mvp-cargo-sacnner-fe.vercel.app';
+	const inviteLink  = `${appUrl}/invite?token=${inviteToken}`;
 
-	// Send invite email via Supabase
-	const appUrl     = 'https://mvp-cargo-sacnner-fe.vercel.app';
-	const inviteLink = `${appUrl}/invite?token=${inviteToken}`;
+	let newInvite;
+
+	try {
+		[newInvite] = await db
+			.insert(invitations)
+			.values({
+				companyId: admin.companyId,
+				invitedBy: admin.id,
+				email:     email.toLowerCase(),
+				role,
+				token:     inviteToken,
+				expiresAt,
+				status:    'pending',
+			})
+			.returning();
+	} catch (dbError) {
+		return reply.code(500).send({ error: `Failed to save invitation to database: ${dbError.message}` });
+	}
 
 	const { error: emailError } = await supabase.auth.admin.inviteUserByEmail(email, {
 		data: {
@@ -356,35 +373,19 @@ export async function createInvitation(request, reply) {
 	});
 
 	if (emailError) {
-		return reply.code(500).send({ error: `Failed to resend email: ${emailError.message}` });
+		await db.delete(invitations).where(eq(invitations.id, newInvite.id));
+		return reply.code(500).send({ error: `Failed to send email: ${emailError.message}` });
 	}
 
-	try{
-		const [newInvite] = await db
-		.insert(invitations)
-		.values({
-			companyId: admin.companyId,
-			invitedBy: admin.id,
-			email:     email.toLowerCase(),
-			role,
-			token:     inviteToken,
-			expiresAt,
-			status:    'pending',
-		})
-		.returning();
-
-		return reply.code(201).send({
-			invitation: {
-				id:        newInvite.id,
-				email:     newInvite.email,
-				role:      newInvite.role,
-				expiresAt: newInvite.expiresAt,
-				inviteLink,
-			},
-		});
-	} catch(e) {
-		return reply.code(500).send({ error: 'Failed to save invitation to database.' });
-	}
+	return reply.code(201).send({
+		invitation: {
+			id:        newInvite.id,
+			email:     newInvite.email,
+			role:      newInvite.role,
+			expiresAt: newInvite.expiresAt,
+			inviteLink,
+		},
+	});
 }
 
 // ─── GET /auth/invite/:token ──────────────────────────────────────────────────
@@ -684,6 +685,26 @@ export async function cancelInvitation(request, reply) {
 
 	if (!deletedInvite) {
 		return reply.code(404).send({ error: 'Pending invitation not found or already processed.' });
+	}
+
+	try {
+		const { data: { users: authUsers }, error: listError } = await supabase.auth.admin.listUsers();
+
+		if (!listError && authUsers) {
+			const userToDelete = authUsers.find(
+				(u) => u.email?.toLowerCase() === deletedInvite.email.toLowerCase()
+			);
+
+			if (userToDelete) {
+				const { error: deleteError } = await supabase.auth.admin.deleteUser(userToDelete.id);
+				
+				if (deleteError) {
+					console.error('Ошибка при удалении юзера из Supabase Auth:', deleteError.message);
+				}
+			}
+		}
+	} catch (err) {
+		console.error('Failure while trying to clear Supabase Auth:', err.message);
 	}
 
 	return reply.send({ message: 'Invitation has been canceled and removed successfully.' });
