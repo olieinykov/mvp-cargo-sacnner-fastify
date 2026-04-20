@@ -63,6 +63,10 @@ export async function signUpByInvite(request, reply) {
 	const { error: updateError } = await supabase.auth.admin.updateUserById(authUserId, {
 		password: password,
 		email_confirm: true,
+		user_metadata: {
+			first_name: firstName,
+			last_name: lastName
+		}
 	});
 
 	if (updateError) {
@@ -139,6 +143,13 @@ export async function signUpAdmin(request, reply) {
 	const { data: authData, error: authError } = await anonSupabase.auth.signUp({
 		email,
 		password,
+		options: {
+			data: {
+				first_name: firstName,
+				last_name: lastName,
+				company_name: company.name
+			}
+		}
 	});
 
 	if (authError) {
@@ -294,8 +305,16 @@ export async function createInvitation(request, reply) {
 
 	// Load admin profile & verify they belong to a company
 	const [admin] = await db
-		.select()
+		.select({
+			id: users.id,
+			role: users.role,
+			companyId: users.companyId,
+			firstName: users.firstName,
+			lastName: users.lastName,
+			companyName: companies.name
+		})
 		.from(users)
+		.leftJoin(companies, eq(users.companyId, companies.id))
 		.where(eq(users.id, authUser.id))
 		.limit(1);
 
@@ -367,7 +386,9 @@ export async function createInvitation(request, reply) {
 		data: {
 			invite_token: inviteToken,
 			company_id:   admin.companyId,
+			company_name: admin.companyName,
 			invited_by:   admin.id,
+			inviter_name: `${admin.firstName} ${admin.lastName}`.trim(),
 		},
 		redirectTo: inviteLink,
 	});
@@ -726,7 +747,19 @@ export async function resendInvitation(request, reply) {
 
 	if (userError || !authUser) return reply.code(401).send({ error: 'Invalid or expired token.' });
 
-	const [admin] = await db.select().from(users).where(eq(users.id, authUser.id)).limit(1);
+	const [admin] = await db
+		.select({
+			id: users.id,
+			role: users.role,
+			companyId: users.companyId,
+			firstName: users.firstName,
+			lastName: users.lastName,
+			companyName: companies.name
+		})
+		.from(users)
+		.leftJoin(companies, eq(users.companyId, companies.id))
+		.where(eq(users.id, authUser.id))
+		.limit(1);
 
 	if (!admin || admin.role !== 'admin' || !admin.companyId) {
 		return reply.code(403).send({ error: 'Admin access required.' });
@@ -760,8 +793,10 @@ export async function resendInvitation(request, reply) {
 	const { error: emailError } = await supabase.auth.admin.inviteUserByEmail(invite.email, {
 		data: {
 			invite_token: invite.token,
-			company_id: admin.companyId,
-			invited_by: admin.id,
+			company_id:   admin.companyId,
+			company_name: admin.companyName,
+			invited_by:   admin.id,
+			inviter_name: `${admin.firstName} ${admin.lastName}`.trim(),
 		},
 		redirectTo: inviteLink,
 	});
