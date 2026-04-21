@@ -1,7 +1,7 @@
 import { pgTable, uuid, jsonb, timestamp, text, pgEnum, boolean } from 'drizzle-orm/pg-core';
 
 export const memberRoleEnum = pgEnum('member_role', ['admin', 'user']);
-export const inviteStatusEnum = pgEnum('invite_status', ['pending', 'accepted', 'expired']);
+export const inviteStatusEnum = pgEnum('invite_status', ['pending', 'accepted', 'expired', 'canceled']);
 
 export const audits = pgTable('audits', {
   id:         uuid('id').primaryKey().defaultRandom(),

@@ -134,11 +134,58 @@ export async function signUpAdmin(request, reply) {
 		});
 	}
 
+	const { client: adminSupabase } = getSupabase();
+
+	const [existingUser] = await db
+		.select({ id: users.id })
+		.from(users)
+		.where(eq(users.email, email.toLowerCase()))
+		.limit(1);
+
+	if (existingUser) {
+		return reply.code(409).send({ error: 'User with this email already exists.' });
+	}
+
+	const [existingCompany] = await db
+		.select()
+		.from(companies)
+		.where(eq(companies.dotNumber, company.dotNumber))
+		.limit(1);
+
+	if (existingCompany) {
+		let isConfirmed = true;
+
+		if (existingCompany.ownerId) {
+			const [owner] = await db
+				.select()
+				.from(users)
+				.where(eq(users.id, existingCompany.ownerId))
+				.limit(1);
+
+			if (owner && !owner.isEmailConfirmed) {
+				isConfirmed = false;
+				await adminSupabase.auth.admin.deleteUser(owner.id).catch(() => {});
+			}
+		} else {
+			isConfirmed = false;
+		}
+
+		if (isConfirmed) {
+			return reply.code(409).send({ error: 'Company with this DOT number is already registered and confirmed.' });
+		} else {
+			await db.transaction(async (tx) => {
+				if (existingCompany.ownerId) {
+					await tx.update(companies).set({ ownerId: null }).where(eq(companies.id, existingCompany.id));
+					await tx.delete(users).where(eq(users.id, existingCompany.ownerId));
+				}
+				await tx.delete(companies).where(eq(companies.id, existingCompany.id));
+			});
+		}
+	}
+
 	const anonSupabase = createClient(supabaseUrl, supabaseAnonKey, {
 		auth: { autoRefreshToken: false, persistSession: false },
 	});
-
-	const { client: adminSupabase } = getSupabase();
 
 	const { data: authData, error: authError } = await anonSupabase.auth.signUp({
 		email,
@@ -330,7 +377,7 @@ export async function createInvitation(request, reply) {
 		return reply.code(403).send({ error: 'Admin is not associated with any company.' });
 	}
 
-	// Check for existing user or pending invite
+	// Check for existing user or pending/expired/canceled invite
 	const [existingUser] = await db
 		.select({ id: users.id })
 		.from(users)
@@ -341,25 +388,51 @@ export async function createInvitation(request, reply) {
 		return reply.code(409).send({ error: 'A user with this email already exists.' });
 	}
 
-	const [pendingInvite] = await db
-		.select({ id: invitations.id })
+	const [existingInvite] = await db
+		.select({ id: invitations.id, status: invitations.status })
 		.from(invitations)
 		.where(
 			and(
 				eq(invitations.email, email.toLowerCase()),
 				eq(invitations.companyId, admin.companyId),
-				eq(invitations.status, 'pending'),
 			),
 		)
 		.limit(1);
 
-	if (pendingInvite) {
-		return reply.code(409).send({ error: 'A pending invitation for this email already exists.' });
+	if (existingInvite) {
+		if (existingInvite.status === 'pending') {
+			return reply.code(409).send({ error: 'A pending invitation for this email already exists.' });
+		}
+
+		if (existingInvite.status === 'expired' || existingInvite.status === 'canceled') {
+			try {
+				const { data: { users: authUsers }, error: listError } = await supabase.auth.admin.listUsers();
+				if (!listError && authUsers) {
+					const userToDelete = authUsers.find(
+						(u) => u.email?.toLowerCase() === email.toLowerCase()
+					);
+					if (userToDelete) {
+						await supabase.auth.admin.deleteUser(userToDelete.id);
+					}
+				}
+			} catch (err) {
+				console.error('Failed to clean up auth.users during recreate:', err.message);
+			}
+		}
 	}
+
+	await db
+		.delete(invitations)
+		.where(
+			and(
+				eq(invitations.email, email.toLowerCase()),
+				eq(invitations.companyId, admin.companyId),
+			)
+	);
 
 	// Create invitation parameters
 	const inviteToken = randomBytes(32).toString('hex');
-	const expiresAt   = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000); // 7 days
+	const expiresAt   = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24 hours
 	const appUrl      = 'https://mvp-cargo-sacnner-fe.vercel.app';
 	const inviteLink  = `${appUrl}/invite?token=${inviteToken}`;
 
@@ -693,8 +766,9 @@ export async function cancelInvitation(request, reply) {
 		return reply.code(403).send({ error: 'Admin access required.' });
 	}
 
-	const [deletedInvite] = await db
-		.delete(invitations)
+	const [canceledInvite] = await db
+		.update(invitations)
+		.set({ status: 'canceled' })
 		.where(
 			and(
 				eq(invitations.id, id),
@@ -704,7 +778,7 @@ export async function cancelInvitation(request, reply) {
 		)
 		.returning();
 
-	if (!deletedInvite) {
+	if (!canceledInvite) {
 		return reply.code(404).send({ error: 'Pending invitation not found or already processed.' });
 	}
 
@@ -713,14 +787,14 @@ export async function cancelInvitation(request, reply) {
 
 		if (!listError && authUsers) {
 			const userToDelete = authUsers.find(
-				(u) => u.email?.toLowerCase() === deletedInvite.email.toLowerCase()
+				(u) => u.email?.toLowerCase() === canceledInvite.email.toLowerCase()
 			);
 
 			if (userToDelete) {
 				const { error: deleteError } = await supabase.auth.admin.deleteUser(userToDelete.id);
 				
 				if (deleteError) {
-					console.error('Ошибка при удалении юзера из Supabase Auth:', deleteError.message);
+					console.error('Error deleting user from Supabase Auth:', deleteError.message);
 				}
 			}
 		}
@@ -728,7 +802,7 @@ export async function cancelInvitation(request, reply) {
 		console.error('Failure while trying to clear Supabase Auth:', err.message);
 	}
 
-	return reply.send({ message: 'Invitation has been canceled and removed successfully.' });
+	return reply.send({ message: 'Invitation has been canceled successfully.' });
 }
 
 // ==========================
@@ -771,28 +845,53 @@ export async function resendInvitation(request, reply) {
 		.where(
 			and(
 				eq(invitations.id, id),
-				eq(invitations.companyId, admin.companyId),
-				eq(invitations.status, 'pending')
+				eq(invitations.companyId, admin.companyId)
 			)
 		)
 		.limit(1);
 
 	if (!invite) {
-		return reply.code(404).send({ error: 'Pending invitation not found.' });
+		return reply.code(404).send({ error: 'Invitation not found.' });
 	}
 
-	const newExpiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+	if (invite.status === 'accepted') {
+		return reply.code(400).send({ error: 'Cannot resend. User has already accepted the invitation.' });
+	}
+
+	if (invite.status === 'expired' || invite.status === 'canceled') {
+		try {
+			const { data: { users: authUsers }, error: listError } = await supabase.auth.admin.listUsers();
+			if (!listError && authUsers) {
+				const userToDelete = authUsers.find(
+					(u) => u.email?.toLowerCase() === invite.email.toLowerCase()
+				);
+				if (userToDelete) {
+					await supabase.auth.admin.deleteUser(userToDelete.id);
+				}
+			}
+		} catch (err) {
+			console.error('Failed to clean up auth.users during resend:', err.message);
+		}
+	}
+
+	const newExpiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000);
+	const newInviteToken = randomBytes(32).toString('hex'); 
+
 	await db
 		.update(invitations)
-		.set({ expiresAt: newExpiresAt })
+		.set({ 
+			expiresAt: newExpiresAt,
+			status: 'pending',
+			token: newInviteToken
+		})
 		.where(eq(invitations.id, invite.id));
 
 	const appUrl = 'https://mvp-cargo-sacnner-fe.vercel.app';
-	const inviteLink = `${appUrl}/invite?token=${invite.token}`;
+	const inviteLink = `${appUrl}/invite?token=${newInviteToken}`;
 
 	const { error: emailError } = await supabase.auth.admin.inviteUserByEmail(invite.email, {
 		data: {
-			invite_token: invite.token,
+			invite_token: newInviteToken,
 			company_id:   admin.companyId,
 			company_name: admin.companyName,
 			invited_by:   admin.id,
