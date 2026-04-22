@@ -1,7 +1,7 @@
 import { createClient } from '@supabase/supabase-js';
 import { db } from '../../db/connection.js';
 import { users, companies, invitations } from '../../db/schema.js';
-import { eq, and } from 'drizzle-orm';
+import { eq, and, inArray } from 'drizzle-orm';
 import { randomBytes } from 'node:crypto';
 import { getSupabase } from '../../lib/supabase.js';
 
@@ -737,7 +737,7 @@ export async function getPendingInvitations(request, reply) {
 		.where(
 			and(
 				eq(invitations.companyId, admin.companyId),
-				eq(invitations.status, 'pending')
+				inArray(invitations.status, ['pending', 'expired'])
 			)
 		);
 
@@ -773,7 +773,7 @@ export async function cancelInvitation(request, reply) {
 			and(
 				eq(invitations.id, id),
 				eq(invitations.companyId, admin.companyId),
-				eq(invitations.status, 'pending')
+				inArray(invitations.status, ['pending', 'expired'])
 			)
 		)
 		.returning();
