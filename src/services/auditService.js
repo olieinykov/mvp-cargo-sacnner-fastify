@@ -196,7 +196,9 @@ export const runAudit = (bolResults, markerResults, cargoResults, isGlobalHazmat
 		);
 		if (!dup) issues.push(issue);
 	};
- 
+	
+	const noBolHasUN = bolResults.every((bol) => parseUNs(v(bol.extracted?.unNumber)).length === 0);
+
 	// ─────────────────────────────────────────────
 	// 0. GLOBAL HAZMAT SPLIT
 	// ─────────────────────────────────────────────
@@ -229,7 +231,6 @@ export const runAudit = (bolResults, markerResults, cargoResults, isGlobalHazmat
 	// An issue is raised only if NO BOL image satisfies the condition.
 	// ─────────────────────────────────────────────
  
-	const noBolHasUN = bolResults.every((bol) => parseUNs(v(bol.extracted?.unNumber)).length === 0);
 	if (noBolHasUN) {
 		addIssue({
 			source: 'BOL',
@@ -599,7 +600,7 @@ export const runAudit = (bolResults, markerResults, cargoResults, isGlobalHazmat
 					fix: `Remove or replace the incorrect placard, or update the BOL to include UN${pu}.`,
 				});
 			}
-			if (!isUNNumberRequiredOnPlacard(pu, bolWeights)) {
+			if (!isUNNumberRequiredOnPlacard(pu, bolWeights) && !noBolHasUN) {
                 addIssue({
                     source: 'CROSS',
                     severity: 'MAJOR',
