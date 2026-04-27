@@ -262,6 +262,7 @@ export const getCompanyUsersSchema = {
 							companyId:        { type: 'string', format: 'uuid', nullable: true },
 							registrationData: { type: 'string' },
 							isActive:         { type: 'boolean' },
+							isOwner:          { type: 'boolean' },
 						},
 					},
 				},

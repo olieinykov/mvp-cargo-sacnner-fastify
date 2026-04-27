@@ -573,12 +573,23 @@ export async function getCompanyUsers(request, reply) {
 		return reply.code(403).send({ error: 'Not associated with a company.' });
 	}
  
+	const [company] = await db
+		.select({ ownerId: companies.ownerId })
+		.from(companies)
+		.where(eq(companies.id, requester.companyId))
+		.limit(1);
+ 
 	const members = await db
 		.select()
 		.from(users)
 		.where(eq(users.companyId, requester.companyId));
  
-	return reply.send({ users: members });
+	const enrichedMembers = members.map(m => ({
+		...m,
+		isOwner: m.id === company?.ownerId
+	}));
+
+	return reply.send({ users: enrichedMembers });
 }
 
 // ==========================
@@ -934,6 +945,16 @@ export async function updateUserRole(request, reply) {
 		return reply.code(400).send({ error: 'You cannot change your own role.' });
 	}
 
+	const [company] = await db
+		.select({ ownerId: companies.ownerId })
+		.from(companies)
+		.where(eq(companies.id, admin.companyId))
+		.limit(1);
+
+	if (company?.ownerId === userId) {
+		return reply.code(403).send({ error: 'You cannot change the role of the company owner.' });
+	}
+
 	const [targetUser] = await db
 		.select({ id: users.id, role: users.role })
 		.from(users)
@@ -996,6 +1017,16 @@ export async function updateUserStatus(request, reply) {
 		return reply.code(400).send({ error: 'You cannot change your own status.' });
 	}
  
+	const [company] = await db
+		.select({ ownerId: companies.ownerId })
+		.from(companies)
+		.where(eq(companies.id, admin.companyId))
+		.limit(1);
+
+	if (company?.ownerId === userId) {
+		return reply.code(403).send({ error: 'You cannot deactivate the company owner.' });
+	}
+
 	const [targetUser] = await db
 		.select({ id: users.id, isActive: users.isActive })
 		.from(users)
