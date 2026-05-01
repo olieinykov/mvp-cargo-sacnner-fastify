@@ -1,75 +1,105 @@
-import { signIn, createInvitation, getInviteInfo, getCompanyUsers, signUpByInvite, signUpAdmin, getMe, requestPasswordReset, updatePassword, getPendingInvitations, cancelInvitation, resendInvitation, updateUserRole, updateUserStatus } from './handlers.js';
-import { signInSchema, createInvitationSchema, getInviteInfoSchema, getCompanyUsersSchema, signUpByInviteSchema, signUpAdminSchema, getMeSchema, requestPasswordResetSchema, updatePasswordSchema, getPendingInvitationsSchema, cancelInvitationSchema, resendInvitationSchema, updateUserRoleSchema, updateUserStatusSchema } from './schema.js';
+import {
+	signIn,
+	createInvitation,
+	getInviteInfo,
+	getCompanyUsers,
+	signUpByInvite,
+	signUpAdmin,
+	getMe,
+	requestPasswordReset,
+	updatePassword,
+	getPendingInvitations,
+	cancelInvitation,
+	resendInvitation,
+	updateUserRole,
+	updateUserStatus,
+} from './handlers.js';
+import {
+	signInSchema,
+	createInvitationSchema,
+	getInviteInfoSchema,
+	getCompanyUsersSchema,
+	signUpByInviteSchema,
+	signUpAdminSchema,
+	getMeSchema,
+	requestPasswordResetSchema,
+	updatePasswordSchema,
+	getPendingInvitationsSchema,
+	cancelInvitationSchema,
+	resendInvitationSchema,
+	updateUserRoleSchema,
+	updateUserStatusSchema,
+} from './schema.js';
 
 const routes = async (fastify) => {
 	fastify.post('/sign-up-invite', {
 		handler: signUpByInvite,
-		schema:  signUpByInviteSchema,
+		schema: signUpByInviteSchema,
 	});
 
 	fastify.post('/sign-up-company', {
 		handler: signUpAdmin,
-		schema:  signUpAdminSchema,
+		schema: signUpAdminSchema,
 	});
 
 	fastify.post('/sign-in', {
 		handler: signIn,
-		schema:  signInSchema,
+		schema: signInSchema,
 	});
 
 	fastify.post('/invitation', {
 		handler: createInvitation,
-		schema:  createInvitationSchema,
+		schema: createInvitationSchema,
 	});
 
 	fastify.get('/invite/:token', {
 		handler: getInviteInfo,
-		schema:  getInviteInfoSchema,
+		schema: getInviteInfoSchema,
 	});
 
 	fastify.get('/users', {
 		handler: getCompanyUsers,
-		schema:  getCompanyUsersSchema,
+		schema: getCompanyUsersSchema,
 	});
 
 	fastify.get('/me', {
 		handler: getMe,
-		schema:  getMeSchema,
+		schema: getMeSchema,
 	});
 
 	fastify.post('/request-password-reset', {
 		handler: requestPasswordReset,
-		schema:  requestPasswordResetSchema,
+		schema: requestPasswordResetSchema,
 	});
 
 	fastify.post('/update-password', {
 		handler: updatePassword,
-		schema:  updatePasswordSchema,
+		schema: updatePasswordSchema,
 	});
 
 	fastify.get('/invitations', {
 		handler: getPendingInvitations,
-		schema:  getPendingInvitationsSchema,
+		schema: getPendingInvitationsSchema,
 	});
 
 	fastify.post('/invitation/:id/cancel', {
 		handler: cancelInvitation,
-		schema:  cancelInvitationSchema,
+		schema: cancelInvitationSchema,
 	});
 
 	fastify.post('/invitation/:id/resend', {
 		handler: resendInvitation,
-		schema:  resendInvitationSchema,
+		schema: resendInvitationSchema,
 	});
 
 	fastify.patch('/users/:userId/role', {
 		handler: updateUserRole,
-		schema:  updateUserRoleSchema,
+		schema: updateUserRoleSchema,
 	});
 
 	fastify.patch('/users/:userId/status', {
 		handler: updateUserStatus,
-		schema:  updateUserStatusSchema,
+		schema: updateUserStatusSchema,
 	});
 };
 

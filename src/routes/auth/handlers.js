@@ -19,7 +19,10 @@ async function resolveAdmin(request, reply, { withCompany = false } = {}) {
 	}
 
 	const { client: supabase } = getSupabase();
-	const { data: { user: authUser }, error: userError } = await supabase.auth.getUser(token);
+	const {
+		data: { user: authUser },
+		error: userError,
+	} = await supabase.auth.getUser(token);
 
 	if (userError || !authUser) {
 		reply.code(401).send({ error: 'Invalid or expired token.' });
@@ -31,11 +34,11 @@ async function resolveAdmin(request, reply, { withCompany = false } = {}) {
 	if (withCompany) {
 		query = db
 			.select({
-				id:          users.id,
-				role:        users.role,
-				companyId:   users.companyId,
-				firstName:   users.firstName,
-				lastName:    users.lastName,
+				id: users.id,
+				role: users.role,
+				companyId: users.companyId,
+				firstName: users.firstName,
+				lastName: users.lastName,
 				companyName: companies.name,
 			})
 			.from(users)
@@ -43,11 +46,7 @@ async function resolveAdmin(request, reply, { withCompany = false } = {}) {
 			.where(eq(users.id, authUser.id))
 			.limit(1);
 	} else {
-		query = db
-			.select()
-			.from(users)
-			.where(eq(users.id, authUser.id))
-			.limit(1);
+		query = db.select().from(users).where(eq(users.id, authUser.id)).limit(1);
 	}
 
 	const [admin] = await query;
@@ -76,12 +75,7 @@ export async function signUpByInvite(request, reply) {
 	const [found] = await db
 		.select()
 		.from(invitations)
-		.where(
-			and(
-				eq(invitations.token, inviteToken),
-				eq(invitations.status, 'pending'),
-			),
-		)
+		.where(and(eq(invitations.token, inviteToken), eq(invitations.status, 'pending')))
 		.limit(1);
 
 	if (!found) {
@@ -89,10 +83,7 @@ export async function signUpByInvite(request, reply) {
 	}
 
 	if (new Date(found.expiresAt) < new Date()) {
-		await db
-			.update(invitations)
-			.set({ status: 'expired' })
-			.where(eq(invitations.id, found.id));
+		await db.update(invitations).set({ status: 'expired' }).where(eq(invitations.id, found.id));
 
 		return reply.code(400).send({ error: 'Invitation token has expired.' });
 	}
@@ -101,16 +92,21 @@ export async function signUpByInvite(request, reply) {
 		return reply.code(400).send({ error: 'Email does not match the invitation.' });
 	}
 
-	const { data: { users: authUsers }, error: listError } = await supabase.auth.admin.listUsers();
+	const {
+		data: { users: authUsers },
+		error: listError,
+	} = await supabase.auth.admin.listUsers();
 
 	if (listError) {
 		return reply.code(500).send({ error: `Auth service error: ${listError.message}` });
 	}
 
-	const authUser = authUsers.find(u => u.email?.toLowerCase() === email.toLowerCase());
+	const authUser = authUsers.find((u) => u.email?.toLowerCase() === email.toLowerCase());
 
 	if (!authUser) {
-		return reply.code(404).send({ error: 'User record not found in Auth system. Contact admin.' });
+		return reply
+			.code(404)
+			.send({ error: 'User record not found in Auth system. Contact admin.' });
 	}
 
 	const authUserId = authUser.id;
@@ -120,8 +116,8 @@ export async function signUpByInvite(request, reply) {
 		email_confirm: true,
 		user_metadata: {
 			first_name: firstName,
-			last_name: lastName
-		}
+			last_name: lastName,
+		},
 	});
 
 	if (updateError) {
@@ -133,13 +129,13 @@ export async function signUpByInvite(request, reply) {
 			const [user] = await tx
 				.insert(users)
 				.values({
-					id:        authUserId,
+					id: authUserId,
 					companyId: found.companyId,
 					firstName,
 					lastName,
-					email:     email.toLowerCase(),
-					role:      found.role,
-					isActive:  true,
+					email: email.toLowerCase(),
+					role: found.role,
+					isActive: true,
 				})
 				.returning();
 
@@ -153,13 +149,13 @@ export async function signUpByInvite(request, reply) {
 
 		return reply.code(201).send({
 			user: {
-				id:        newUser.id,
-				email:     newUser.email,
+				id: newUser.id,
+				email: newUser.email,
 				firstName: newUser.firstName,
-				lastName:  newUser.lastName,
-				role:      newUser.role,
+				lastName: newUser.lastName,
+				role: newUser.role,
 				companyId: newUser.companyId,
-				isActive:  newUser.isActive,
+				isActive: newUser.isActive,
 			},
 		});
 	} catch (err) {
@@ -184,8 +180,8 @@ export async function signUpAdmin(request, reply) {
 	const supabaseAnonKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
 	if (!supabaseUrl || !supabaseAnonKey) {
-		return reply.code(500).send({ 
-			error: 'SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY env vars are required.' 
+		return reply.code(500).send({
+			error: 'SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY env vars are required.',
 		});
 	}
 
@@ -226,11 +222,18 @@ export async function signUpAdmin(request, reply) {
 		}
 
 		if (isConfirmed) {
-			return reply.code(409).send({ error: 'Company with this DOT number is already registered and confirmed.' });
+			return reply
+				.code(409)
+				.send({
+					error: 'Company with this DOT number is already registered and confirmed.',
+				});
 		} else {
 			await db.transaction(async (tx) => {
 				if (existingCompany.ownerId) {
-					await tx.update(companies).set({ ownerId: null }).where(eq(companies.id, existingCompany.id));
+					await tx
+						.update(companies)
+						.set({ ownerId: null })
+						.where(eq(companies.id, existingCompany.id));
 					await tx.delete(users).where(eq(users.id, existingCompany.ownerId));
 				}
 				await tx.delete(companies).where(eq(companies.id, existingCompany.id));
@@ -249,9 +252,9 @@ export async function signUpAdmin(request, reply) {
 			data: {
 				first_name: firstName,
 				last_name: lastName,
-				company_name: company.name
-			}
-		}
+				company_name: company.name,
+			},
+		},
 	});
 
 	if (authError) {
@@ -269,22 +272,22 @@ export async function signUpAdmin(request, reply) {
 			const [company_] = await tx
 				.insert(companies)
 				.values({
-					name:      company.name,
+					name: company.name,
 					dotNumber: company.dotNumber,
-					mcNumber:  company.mcNumber ?? null,
+					mcNumber: company.mcNumber ?? null,
 				})
 				.returning();
 
 			const [user] = await tx
 				.insert(users)
 				.values({
-					id:        authUserId,
+					id: authUserId,
 					companyId: company_.id,
 					firstName,
 					lastName,
-					email:     email.toLowerCase(),
-					role:      'admin',
-					isActive:  true,
+					email: email.toLowerCase(),
+					role: 'admin',
+					isActive: true,
 				})
 				.returning();
 
@@ -299,25 +302,27 @@ export async function signUpAdmin(request, reply) {
 
 		return reply.code(201).send({
 			user: {
-				id:        newUser.id,
-				email:     newUser.email,
+				id: newUser.id,
+				email: newUser.email,
 				firstName: newUser.firstName,
-				lastName:  newUser.lastName,
-				role:      newUser.role,
+				lastName: newUser.lastName,
+				role: newUser.role,
 				companyId: newUser.companyId,
 			},
 			company: {
-				id:        newCompany.id,
-				name:      newCompany.name,
+				id: newCompany.id,
+				name: newCompany.name,
 				dotNumber: newCompany.dotNumber,
-				mcNumber:  newCompany.mcNumber,
-				ownerId:   newCompany.ownerId,
-				status:    newCompany.status,
+				mcNumber: newCompany.mcNumber,
+				ownerId: newCompany.ownerId,
+				status: newCompany.status,
 			},
 		});
 	} catch (err) {
 		await adminSupabase.auth.admin.deleteUser(authUserId).catch(() => {});
-		return reply.code(502).send({ error: `Failed to create company or user profile: ${err.message}` });
+		return reply
+			.code(502)
+			.send({ error: `Failed to create company or user profile: ${err.message}` });
 	}
 }
 
@@ -342,21 +347,16 @@ export async function signIn(request, reply) {
 		return reply.code(403).send({ error: 'EMAIL_NOT_CONFIRMED' });
 	}
 
-	const [profile] = await db
-		.select()
-		.from(users)
-		.where(eq(users.id, authUser.id))
-		.limit(1);
+	const [profile] = await db.select().from(users).where(eq(users.id, authUser.id)).limit(1);
 
 	if (profile && profile.isActive === false) {
-		return reply.code(403).send({ error: 'Account is deactivated. Please contact your administrator.' });
+		return reply
+			.code(403)
+			.send({ error: 'Account is deactivated. Please contact your administrator.' });
 	}
 
 	if (profile && !profile.isEmailConfirmed) {
-		await db
-			.update(users)
-			.set({ isEmailConfirmed: true })
-			.where(eq(users.id, authUser.id));
+		await db.update(users).set({ isEmailConfirmed: true }).where(eq(users.id, authUser.id));
 
 		if (profile.companyId) {
 			await db
@@ -367,18 +367,18 @@ export async function signIn(request, reply) {
 	}
 
 	return reply.send({
-		accessToken:  session.access_token,
+		accessToken: session.access_token,
 		refreshToken: session.refresh_token,
-		expiresIn:    session.expires_in,
+		expiresIn: session.expires_in,
 		user: profile
 			? {
-				id:        profile.id,
-				email:     profile.email,
-				firstName: profile.firstName,
-				lastName:  profile.lastName,
-				role:      profile.role,
-				companyId: profile.companyId,
-			}
+					id: profile.id,
+					email: profile.email,
+					firstName: profile.firstName,
+					lastName: profile.lastName,
+					role: profile.role,
+					companyId: profile.companyId,
+				}
 			: { id: authUser.id, email: authUser.email },
 	});
 }
@@ -419,15 +419,20 @@ export async function createInvitation(request, reply) {
 
 	if (existingInvite) {
 		if (existingInvite.status === 'pending') {
-			return reply.code(409).send({ error: 'A pending invitation for this email already exists.' });
+			return reply
+				.code(409)
+				.send({ error: 'A pending invitation for this email already exists.' });
 		}
 
 		if (existingInvite.status === 'expired' || existingInvite.status === 'canceled') {
 			try {
-				const { data: { users: authUsers }, error: listError } = await supabase.auth.admin.listUsers();
+				const {
+					data: { users: authUsers },
+					error: listError,
+				} = await supabase.auth.admin.listUsers();
 				if (!listError && authUsers) {
 					const userToDelete = authUsers.find(
-						(u) => u.email?.toLowerCase() === email.toLowerCase()
+						(u) => u.email?.toLowerCase() === email.toLowerCase(),
 					);
 					if (userToDelete) {
 						await supabase.auth.admin.deleteUser(userToDelete.id);
@@ -445,14 +450,14 @@ export async function createInvitation(request, reply) {
 			and(
 				eq(invitations.email, email.toLowerCase()),
 				eq(invitations.companyId, admin.companyId),
-			)
-	);
+			),
+		);
 
 	// Create invitation parameters
 	const inviteToken = randomBytes(32).toString('hex');
-	const expiresAt   = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24 hours
-	const appUrl      = 'https://mvp-cargo-sacnner-fe.vercel.app';
-	const inviteLink  = `${appUrl}/invite?token=${inviteToken}`;
+	const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24 hours
+	const appUrl = 'https://mvp-cargo-sacnner-fe.vercel.app';
+	const inviteLink = `${appUrl}/invite?token=${inviteToken}`;
 
 	let newInvite;
 
@@ -462,23 +467,25 @@ export async function createInvitation(request, reply) {
 			.values({
 				companyId: admin.companyId,
 				invitedBy: admin.id,
-				email:     email.toLowerCase(),
+				email: email.toLowerCase(),
 				role,
-				token:     inviteToken,
+				token: inviteToken,
 				expiresAt,
-				status:    'pending',
+				status: 'pending',
 			})
 			.returning();
 	} catch (dbError) {
-		return reply.code(500).send({ error: `Failed to save invitation to database: ${dbError.message}` });
+		return reply
+			.code(500)
+			.send({ error: `Failed to save invitation to database: ${dbError.message}` });
 	}
 
 	const { error: emailError } = await supabase.auth.admin.inviteUserByEmail(email, {
 		data: {
 			invite_token: inviteToken,
-			company_id:   admin.companyId,
+			company_id: admin.companyId,
 			company_name: admin.companyName,
-			invited_by:   admin.id,
+			invited_by: admin.id,
 			inviter_name: `${admin.firstName} ${admin.lastName}`.trim(),
 		},
 		redirectTo: inviteLink,
@@ -491,9 +498,9 @@ export async function createInvitation(request, reply) {
 
 	return reply.code(201).send({
 		invitation: {
-			id:        newInvite.id,
-			email:     newInvite.email,
-			role:      newInvite.role,
+			id: newInvite.id,
+			email: newInvite.email,
+			role: newInvite.role,
 			expiresAt: newInvite.expiresAt,
 			inviteLink,
 		},
@@ -501,58 +508,55 @@ export async function createInvitation(request, reply) {
 }
 
 // ─── GET /auth/invite/:token ──────────────────────────────────────────────────
- 
+
 export async function getInviteInfo(request, reply) {
 	const { token } = request.params;
- 
+
 	const [invite] = await db
 		.select({
-			email:     invitations.email,
-			role:      invitations.role,
+			email: invitations.email,
+			role: invitations.role,
 			expiresAt: invitations.expiresAt,
-			status:    invitations.status,
+			status: invitations.status,
 			companyId: invitations.companyId,
 		})
 		.from(invitations)
 		.where(eq(invitations.token, token))
 		.limit(1);
- 
+
 	if (!invite) {
 		return reply.code(404).send({ error: 'Invitation not found.' });
 	}
- 
+
 	if (invite.status !== 'pending') {
 		return reply.code(400).send({ error: `Invitation is already ${invite.status}.` });
 	}
- 
+
 	if (new Date(invite.expiresAt) < new Date()) {
-		await db
-			.update(invitations)
-			.set({ status: 'expired' })
-			.where(eq(invitations.token, token));
+		await db.update(invitations).set({ status: 'expired' }).where(eq(invitations.token, token));
 		return reply.code(400).send({ error: 'Invitation has expired.' });
 	}
- 
+
 	// Fetch company name
 	const [company] = await db
 		.select({ id: companies.id, name: companies.name })
 		.from(companies)
 		.where(eq(companies.id, invite.companyId))
 		.limit(1);
- 
+
 	return reply.send({
-		email:     invite.email,
-		role:      invite.role,
+		email: invite.email,
+		role: invite.role,
 		expiresAt: invite.expiresAt,
 		company: {
-			id:   company?.id ?? invite.companyId,
+			id: company?.id ?? invite.companyId,
 			name: company?.name ?? 'Unknown company',
 		},
 	});
 }
- 
+
 // ─── GET /auth/users ──────────────────────────────────────────────────────────
- 
+
 export async function getCompanyUsers(request, reply) {
 	const admin = await resolveAdmin(request, reply);
 	if (!admin) return;
@@ -568,15 +572,12 @@ export async function getCompanyUsers(request, reply) {
 		.from(companies)
 		.where(eq(companies.id, admin.companyId))
 		.limit(1);
- 
-	const members = await db
-		.select()
-		.from(users)
-		.where(eq(users.companyId, admin.companyId));
- 
-	const enrichedMembers = members.map(m => ({
+
+	const members = await db.select().from(users).where(eq(users.companyId, admin.companyId));
+
+	const enrichedMembers = members.map((m) => ({
 		...m,
-		isOwner: m.id === company?.ownerId
+		isOwner: m.id === company?.ownerId,
 	}));
 
 	return reply.send({ users: enrichedMembers });
@@ -596,7 +597,10 @@ export async function getMe(request, reply) {
 
 	const { client: supabase } = getSupabase();
 
-	const { data: { user: authUser }, error: userError } = await supabase.auth.getUser(token);
+	const {
+		data: { user: authUser },
+		error: userError,
+	} = await supabase.auth.getUser(token);
 
 	if (userError || !authUser) {
 		return reply.code(401).send({ error: 'Invalid or expired token.' });
@@ -604,16 +608,16 @@ export async function getMe(request, reply) {
 
 	const [result] = await db
 		.select({
-			id:               users.id,
-			email:            users.email,
-			firstName:        users.firstName,
-			lastName:         users.lastName,
-			role:             users.role,
-			companyId:        users.companyId,
+			id: users.id,
+			email: users.email,
+			firstName: users.firstName,
+			lastName: users.lastName,
+			role: users.role,
+			companyId: users.companyId,
 			registrationData: users.registrationData,
 			isEmailConfirmed: users.isEmailConfirmed,
-			isActive: 		  users.isActive,
-			companyName:      companies.name,
+			isActive: users.isActive,
+			companyName: companies.name,
 		})
 		.from(users)
 		.leftJoin(companies, eq(users.companyId, companies.id))
@@ -629,15 +633,15 @@ export async function getMe(request, reply) {
 	}
 
 	return reply.send({
-		id:               result.id,
-		email:            result.email,
-		firstName:        result.firstName,
-		lastName:         result.lastName,
-		role:             result.role,
-		companyId:        result.companyId,
+		id: result.id,
+		email: result.email,
+		firstName: result.firstName,
+		lastName: result.lastName,
+		role: result.role,
+		companyId: result.companyId,
 		registrationData: result.registrationData,
 		isEmailConfirmed: result.isEmailConfirmed,
-		companyName:      result.companyName,
+		companyName: result.companyName,
 	});
 }
 
@@ -659,7 +663,7 @@ export async function requestPasswordReset(request, reply) {
 	}
 
 	const { client: supabase } = getSupabase();
-	
+
 	const appUrl = 'https://mvp-cargo-sacnner-fe.vercel.app';
 	const resetLink = `${appUrl}/update-password`;
 
@@ -689,14 +693,17 @@ export async function updatePassword(request, reply) {
 
 	const { client: supabase } = getSupabase();
 
-	const { data: { user }, error: userError } = await supabase.auth.getUser(token);
+	const {
+		data: { user },
+		error: userError,
+	} = await supabase.auth.getUser(token);
 
 	if (userError || !user) {
 		return reply.code(401).send({ error: 'Invalid or expired recovery token.' });
 	}
 
 	const { error: updateError } = await supabase.auth.admin.updateUserById(user.id, {
-		password: password
+		password: password,
 	});
 
 	if (updateError) {
@@ -716,18 +723,18 @@ export async function getPendingInvitations(request, reply) {
 
 	const pendingInvites = await db
 		.select({
-			id:        invitations.id,
-			email:     invitations.email,
-			role:      invitations.role,
+			id: invitations.id,
+			email: invitations.email,
+			role: invitations.role,
 			expiresAt: invitations.expiresAt,
-			token:     invitations.token
+			token: invitations.token,
 		})
 		.from(invitations)
 		.where(
 			and(
 				eq(invitations.companyId, admin.companyId),
-				inArray(invitations.status, ['pending', 'expired'])
-			)
+				inArray(invitations.status, ['pending', 'expired']),
+			),
 		);
 
 	return reply.send({ invitations: pendingInvites });
@@ -752,26 +759,33 @@ export async function cancelInvitation(request, reply) {
 			and(
 				eq(invitations.id, id),
 				eq(invitations.companyId, admin.companyId),
-				inArray(invitations.status, ['pending', 'expired'])
-			)
+				inArray(invitations.status, ['pending', 'expired']),
+			),
 		)
 		.returning();
 
 	if (!canceledInvite) {
-		return reply.code(404).send({ error: 'Pending invitation not found or already processed.' });
+		return reply
+			.code(404)
+			.send({ error: 'Pending invitation not found or already processed.' });
 	}
 
 	try {
-		const { data: { users: authUsers }, error: listError } = await supabase.auth.admin.listUsers();
+		const {
+			data: { users: authUsers },
+			error: listError,
+		} = await supabase.auth.admin.listUsers();
 
 		if (!listError && authUsers) {
 			const userToDelete = authUsers.find(
-				(u) => u.email?.toLowerCase() === canceledInvite.email.toLowerCase()
+				(u) => u.email?.toLowerCase() === canceledInvite.email.toLowerCase(),
 			);
 
 			if (userToDelete) {
-				const { error: deleteError } = await supabase.auth.admin.deleteUser(userToDelete.id);
-				
+				const { error: deleteError } = await supabase.auth.admin.deleteUser(
+					userToDelete.id,
+				);
+
 				if (deleteError) {
 					console.error('Error deleting user from Supabase Auth:', deleteError.message);
 				}
@@ -799,12 +813,7 @@ export async function resendInvitation(request, reply) {
 	const [invite] = await db
 		.select()
 		.from(invitations)
-		.where(
-			and(
-				eq(invitations.id, id),
-				eq(invitations.companyId, admin.companyId)
-			)
-		)
+		.where(and(eq(invitations.id, id), eq(invitations.companyId, admin.companyId)))
 		.limit(1);
 
 	if (!invite) {
@@ -812,15 +821,20 @@ export async function resendInvitation(request, reply) {
 	}
 
 	if (invite.status === 'accepted') {
-		return reply.code(400).send({ error: 'Cannot resend. User has already accepted the invitation.' });
+		return reply
+			.code(400)
+			.send({ error: 'Cannot resend. User has already accepted the invitation.' });
 	}
 
 	if (invite.status === 'expired' || invite.status === 'canceled') {
 		try {
-			const { data: { users: authUsers }, error: listError } = await supabase.auth.admin.listUsers();
+			const {
+				data: { users: authUsers },
+				error: listError,
+			} = await supabase.auth.admin.listUsers();
 			if (!listError && authUsers) {
 				const userToDelete = authUsers.find(
-					(u) => u.email?.toLowerCase() === invite.email.toLowerCase()
+					(u) => u.email?.toLowerCase() === invite.email.toLowerCase(),
 				);
 				if (userToDelete) {
 					await supabase.auth.admin.deleteUser(userToDelete.id);
@@ -832,14 +846,14 @@ export async function resendInvitation(request, reply) {
 	}
 
 	const newExpiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000);
-	const newInviteToken = randomBytes(32).toString('hex'); 
+	const newInviteToken = randomBytes(32).toString('hex');
 
 	await db
 		.update(invitations)
-		.set({ 
+		.set({
 			expiresAt: newExpiresAt,
 			status: 'pending',
-			token: newInviteToken
+			token: newInviteToken,
 		})
 		.where(eq(invitations.id, invite.id));
 
@@ -849,9 +863,9 @@ export async function resendInvitation(request, reply) {
 	const { error: emailError } = await supabase.auth.admin.inviteUserByEmail(invite.email, {
 		data: {
 			invite_token: newInviteToken,
-			company_id:   admin.companyId,
+			company_id: admin.companyId,
 			company_name: admin.companyName,
-			invited_by:   admin.id,
+			invited_by: admin.id,
 			inviter_name: `${admin.firstName} ${admin.lastName}`.trim(),
 		},
 		redirectTo: inviteLink,
@@ -892,12 +906,7 @@ export async function updateUserRole(request, reply) {
 	const [targetUser] = await db
 		.select({ id: users.id, role: users.role })
 		.from(users)
-		.where(
-			and(
-				eq(users.id, userId),
-				eq(users.companyId, admin.companyId)
-			)
-		)
+		.where(and(eq(users.id, userId), eq(users.companyId, admin.companyId)))
 		.limit(1);
 
 	if (!targetUser) {
@@ -917,28 +926,28 @@ export async function updateUserRole(request, reply) {
 	return reply.send({
 		message: 'User role updated successfully.',
 		user: {
-			id:    updatedUser.id,
+			id: updatedUser.id,
 			email: updatedUser.email,
-			role:  updatedUser.role,
-		}
+			role: updatedUser.role,
+		},
 	});
 }
 
 // ==========================
 // PATCH /auth/users/:userId/status
 // ==========================
- 
+
 export async function updateUserStatus(request, reply) {
 	const { userId } = request.params;
 	const { isActive } = request.body;
 
 	const admin = await resolveAdmin(request, reply);
 	if (!admin) return;
- 
+
 	if (admin.id === userId) {
 		return reply.code(400).send({ error: 'You cannot change your own status.' });
 	}
- 
+
 	const [company] = await db
 		.select({ ownerId: companies.ownerId })
 		.from(companies)
@@ -952,37 +961,32 @@ export async function updateUserStatus(request, reply) {
 	const [targetUser] = await db
 		.select({ id: users.id, isActive: users.isActive })
 		.from(users)
-		.where(
-			and(
-				eq(users.id, userId),
-				eq(users.companyId, admin.companyId)
-			)
-		)
+		.where(and(eq(users.id, userId), eq(users.companyId, admin.companyId)))
 		.limit(1);
- 
+
 	if (!targetUser) {
 		return reply.code(404).send({ error: 'User not found in your company.' });
 	}
- 
+
 	if (targetUser.isActive === isActive) {
 		return reply.code(400).send({
 			error: `User is already ${isActive ? 'active' : 'inactive'}.`,
 		});
 	}
- 
+
 	const [updatedUser] = await db
 		.update(users)
 		.set({ isActive })
 		.where(eq(users.id, userId))
 		.returning();
- 
+
 	return reply.send({
 		message: `User ${isActive ? 'activated' : 'deactivated'} successfully.`,
 		user: {
-			id:       updatedUser.id,
-			email:    updatedUser.email,
-			role:     updatedUser.role,
+			id: updatedUser.id,
+			email: updatedUser.email,
+			role: updatedUser.role,
 			isActive: updatedUser.isActive,
-		}
+		},
 	});
 }

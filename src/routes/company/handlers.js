@@ -17,18 +17,17 @@ async function resolveAdmin(request, reply) {
 	}
 
 	const { client: supabase } = getSupabase();
-	const { data: { user: authUser }, error: userError } = await supabase.auth.getUser(token);
+	const {
+		data: { user: authUser },
+		error: userError,
+	} = await supabase.auth.getUser(token);
 
 	if (userError || !authUser) {
 		reply.code(401).send({ error: 'Invalid or expired token.' });
 		return null;
 	}
 
-	const [admin] = await db
-		.select()
-		.from(users)
-		.where(eq(users.id, authUser.id))
-		.limit(1);
+	const [admin] = await db.select().from(users).where(eq(users.id, authUser.id)).limit(1);
 
 	if (!admin || admin.role !== 'admin' || !admin.companyId) {
 		reply.code(403).send({ error: 'Admin access required.' });
@@ -51,11 +50,7 @@ export async function getCompany(request, reply) {
 		return reply.code(403).send({ error: 'You do not have access to this company.' });
 	}
 
-	const [company] = await db
-		.select()
-		.from(companies)
-		.where(eq(companies.id, companyId))
-		.limit(1);
+	const [company] = await db.select().from(companies).where(eq(companies.id, companyId)).limit(1);
 
 	if (!company) {
 		return reply.code(404).send({ error: 'Company not found.' });
@@ -83,16 +78,13 @@ export async function updateCompany(request, reply) {
 		const [existing] = await db
 			.select({ id: companies.id })
 			.from(companies)
-			.where(
-				and(
-					eq(companies.dotNumber, dotNumber),
-					ne(companies.id, companyId)
-				)
-			)
+			.where(and(eq(companies.dotNumber, dotNumber), ne(companies.id, companyId)))
 			.limit(1);
 
 		if (existing) {
-			return reply.code(409).send({ error: 'A company with this DOT number already exists.' });
+			return reply
+				.code(409)
+				.send({ error: 'A company with this DOT number already exists.' });
 		}
 	}
 
@@ -146,9 +138,12 @@ export async function getCompanyHazmat(request, reply) {
 	const FMCSA_API_KEY = process.env.FMCSA_API_KEY;
 
 	try {
-		const res = await fetch(`https://fmcsa-integration.vercel.app/api/companies/${dotNumber}?fields=hm_ind`, {
-			headers: { Authorization: `Bearer ${FMCSA_API_KEY}` },
-		});
+		const res = await fetch(
+			`https://fmcsa-integration.vercel.app/api/companies/${dotNumber}?fields=hm_ind`,
+			{
+				headers: { Authorization: `Bearer ${FMCSA_API_KEY}` },
+			},
+		);
 
 		if (!res.ok) throw new Error(`FMCSA API error: ${res.status}`);
 
@@ -171,9 +166,12 @@ export async function getCompanyInspections(request, reply) {
 	const FMCSA_API_KEY = process.env.FMCSA_API_KEY;
 
 	try {
-		const res = await fetch(`https://fmcsa-integration.vercel.app/api/companies/${dotNumber}/inspections`, {
-			headers: { Authorization: `Bearer ${FMCSA_API_KEY}` },
-		});
+		const res = await fetch(
+			`https://fmcsa-integration.vercel.app/api/companies/${dotNumber}/inspections`,
+			{
+				headers: { Authorization: `Bearer ${FMCSA_API_KEY}` },
+			},
+		);
 
 		if (!res.ok) throw new Error(`FMCSA API error: ${res.status}`);
 
@@ -195,9 +193,12 @@ export async function getInspectionViolations(request, reply) {
 	const FMCSA_API_KEY = process.env.FMCSA_API_KEY;
 
 	try {
-		const res = await fetch(`https://fmcsa-integration.vercel.app/api/inspections/${id}/violations`, {
-			headers: { Authorization: `Bearer ${FMCSA_API_KEY}` },
-		});
+		const res = await fetch(
+			`https://fmcsa-integration.vercel.app/api/inspections/${id}/violations`,
+			{
+				headers: { Authorization: `Bearer ${FMCSA_API_KEY}` },
+			},
+		);
 
 		if (!res.ok) throw new Error(`FMCSA API error: ${res.status}`);
 

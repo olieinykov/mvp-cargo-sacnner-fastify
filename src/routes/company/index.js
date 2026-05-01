@@ -1,30 +1,42 @@
-import { getCompany, updateCompany, getCompanyHazmat, getCompanyInspections, getInspectionViolations } from './handlers.js';
-import { getCompanySchema, updateCompanySchema, getCompanyHazmatSchema, getCompanyInspectionsSchema, getInspectionViolationsSchema } from './schema.js';
+import {
+	getCompany,
+	updateCompany,
+	getCompanyHazmat,
+	getCompanyInspections,
+	getInspectionViolations,
+} from './handlers.js';
+import {
+	getCompanySchema,
+	updateCompanySchema,
+	getCompanyHazmatSchema,
+	getCompanyInspectionsSchema,
+	getInspectionViolationsSchema,
+} from './schema.js';
 
 const routes = async (fastify) => {
 	fastify.get('/:companyId', {
 		handler: getCompany,
-		schema:  getCompanySchema,
+		schema: getCompanySchema,
 	});
 
 	fastify.patch('/:companyId', {
 		handler: updateCompany,
-		schema:  updateCompanySchema,
+		schema: updateCompanySchema,
 	});
 
 	fastify.get('/:dotNumber/fmcsa/hazmat', {
 		handler: getCompanyHazmat,
-		schema:  getCompanyHazmatSchema,
+		schema: getCompanyHazmatSchema,
 	});
 
 	fastify.get('/:dotNumber/fmcsa/inspections', {
 		handler: getCompanyInspections,
-		schema:  getCompanyInspectionsSchema,
+		schema: getCompanyInspectionsSchema,
 	});
 
 	fastify.get('/inspections/:id/violations', {
 		handler: getInspectionViolations,
-		schema:  getInspectionViolationsSchema,
+		schema: getInspectionViolationsSchema,
 	});
 };
 

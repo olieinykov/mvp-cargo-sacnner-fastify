@@ -5,14 +5,18 @@ export const getAuditsSchema = {
 	querystring: {
 		type: 'object',
 		properties: {
-			page:      { type: 'integer', minimum: 1, default: 1 },
-			limit:     { type: 'integer', minimum: 1, maximum: 100, default: 20 },
+			page: { type: 'integer', minimum: 1, default: 1 },
+			limit: { type: 'integer', minimum: 1, maximum: 100, default: 20 },
 			auditorId: { type: 'string' },
-			sortBy:    { type: 'string', enum: ['date', 'score'], default: 'date' },
+			sortBy: { type: 'string', enum: ['date', 'score'], default: 'date' },
 			sortOrder: { type: 'string', enum: ['asc', 'desc'], default: 'desc' },
-			status:    { type: 'string', enum: ['passed', 'failed'] },
-			dateFrom:  { type: 'string', format: 'date-time', description: 'ISO date string (e.g., 2026-04-01T00:00:00Z)' },
-			dateTo:    { type: 'string', format: 'date-time', description: 'ISO date string' },
+			status: { type: 'string', enum: ['passed', 'failed'] },
+			dateFrom: {
+				type: 'string',
+				format: 'date-time',
+				description: 'ISO date string (e.g., 2026-04-01T00:00:00Z)',
+			},
+			dateTo: { type: 'string', format: 'date-time', description: 'ISO date string' },
 		},
 	},
 	response: {
@@ -24,17 +28,17 @@ export const getAuditsSchema = {
 					items: {
 						type: 'object',
 						properties: {
-							id:          { type: 'string', format: 'uuid' },
-							is_passed:   { type: 'string' },
-							score:       { type: 'string' },
-							created_at:  { type: 'string' },
-							response:    { type: 'object', additionalProperties: true },
+							id: { type: 'string', format: 'uuid' },
+							is_passed: { type: 'string' },
+							score: { type: 'string' },
+							created_at: { type: 'string' },
+							response: { type: 'object', additionalProperties: true },
 							auditImages: {
 								type: 'array',
 								items: {
 									type: 'object',
 									properties: {
-										url:  { type: 'string' },
+										url: { type: 'string' },
 										type: { type: 'string' },
 									},
 								},
@@ -45,10 +49,10 @@ export const getAuditsSchema = {
 				pagination: {
 					type: 'object',
 					properties: {
-						total:       { type: 'integer' },
-						page:        { type: 'integer' },
-						limit:       { type: 'integer' },
-						totalPages:  { type: 'integer' },
+						total: { type: 'integer' },
+						page: { type: 'integer' },
+						limit: { type: 'integer' },
+						totalPages: { type: 'integer' },
 						hasNextPage: { type: 'boolean' },
 						hasPrevPage: { type: 'boolean' },
 					},
@@ -66,7 +70,7 @@ const imageFileSchema = {
 	properties: {
 		filename: { type: 'string' },
 		mimetype: { type: 'string' },
-		_buf:     { type: 'object' },
+		_buf: { type: 'object' },
 	},
 };
 
@@ -77,7 +81,8 @@ const imageFileSchema = {
 export const uploadAuditImagesSchema = {
 	tags: ['Audit'],
 	summary: 'Upload audit images',
-	description: 'Uploads shipment images to Supabase Storage and returns their storage IDs and public URLs. Call this before POST /audit.',
+	description:
+		'Uploads shipment images to Supabase Storage and returns their storage IDs and public URLs. Call this before POST /audit.',
 	consumes: ['multipart/form-data'],
 	body: {
 		type: 'object',
@@ -106,8 +111,14 @@ export const uploadAuditImagesSchema = {
 						type: 'object',
 						required: ['id', 'url'],
 						properties: {
-							id:  { type: 'string', description: 'Supabase storage key — pass back as imageIds[]' },
-							url: { type: 'string', description: 'Public URL of the uploaded image' },
+							id: {
+								type: 'string',
+								description: 'Supabase storage key — pass back as imageIds[]',
+							},
+							url: {
+								type: 'string',
+								description: 'Public URL of the uploaded image',
+							},
 						},
 					},
 				},

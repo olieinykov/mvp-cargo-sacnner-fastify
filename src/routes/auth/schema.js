@@ -9,10 +9,10 @@ export const signUpByInviteSchema = {
 		type: 'object',
 		required: ['email', 'password', 'firstName', 'lastName'],
 		properties: {
-			email:       { type: 'string', format: 'email' },
-			password:    { type: 'string', minLength: 8 },
-			firstName:   { type: 'string', minLength: 1 },
-			lastName:    { type: 'string', minLength: 1 },
+			email: { type: 'string', format: 'email' },
+			password: { type: 'string', minLength: 8 },
+			firstName: { type: 'string', minLength: 1 },
+			lastName: { type: 'string', minLength: 1 },
 			inviteToken: {
 				type: 'string',
 				description: 'Path A only. Token received in the invitation email.',
@@ -26,11 +26,11 @@ export const signUpByInviteSchema = {
 				user: {
 					type: 'object',
 					properties: {
-						id:        { type: 'string', format: 'uuid' },
-						email:     { type: 'string', format: 'email' },
+						id: { type: 'string', format: 'uuid' },
+						email: { type: 'string', format: 'email' },
 						firstName: { type: 'string' },
-						lastName:  { type: 'string' },
-						role:      { type: 'string' },
+						lastName: { type: 'string' },
+						role: { type: 'string' },
 						companyId: { type: 'string', format: 'uuid', nullable: true },
 					},
 				},
@@ -51,18 +51,18 @@ export const signUpAdminSchema = {
 		type: 'object',
 		required: ['email', 'password', 'firstName', 'lastName'],
 		properties: {
-			email:       { type: 'string', format: 'email' },
-			password:    { type: 'string', minLength: 8 },
-			firstName:   { type: 'string', minLength: 1 },
-			lastName:    { type: 'string', minLength: 1 },
+			email: { type: 'string', format: 'email' },
+			password: { type: 'string', minLength: 8 },
+			firstName: { type: 'string', minLength: 1 },
+			lastName: { type: 'string', minLength: 1 },
 			company: {
 				type: 'object',
 				description: 'Path B only. Required when registering without an invite token.',
 				required: ['name', 'dotNumber'],
 				properties: {
-					name:      { type: 'string', minLength: 1 },
+					name: { type: 'string', minLength: 1 },
 					dotNumber: { type: 'string', minLength: 1 },
-					mcNumber:  { type: 'string', description: 'Optional MC number.' },
+					mcNumber: { type: 'string', description: 'Optional MC number.' },
 				},
 			},
 		},
@@ -74,11 +74,11 @@ export const signUpAdminSchema = {
 				user: {
 					type: 'object',
 					properties: {
-						id:        { type: 'string', format: 'uuid' },
-						email:     { type: 'string', format: 'email' },
+						id: { type: 'string', format: 'uuid' },
+						email: { type: 'string', format: 'email' },
 						firstName: { type: 'string' },
-						lastName:  { type: 'string' },
-						role:      { type: 'string' },
+						lastName: { type: 'string' },
+						role: { type: 'string' },
 						companyId: { type: 'string', format: 'uuid', nullable: true },
 					},
 				},
@@ -86,12 +86,12 @@ export const signUpAdminSchema = {
 					type: 'object',
 					nullable: true,
 					properties: {
-						id:        { type: 'string', format: 'uuid' },
-						name:      { type: 'string' },
+						id: { type: 'string', format: 'uuid' },
+						name: { type: 'string' },
 						dotNumber: { type: 'string' },
-						mcNumber:  { type: 'string', nullable: true },
-						ownerId:   { type: 'string', format: 'uuid' },
-						status:    { type: 'string' },
+						mcNumber: { type: 'string', nullable: true },
+						ownerId: { type: 'string', format: 'uuid' },
+						status: { type: 'string' },
 					},
 				},
 			},
@@ -104,12 +104,13 @@ export const signUpAdminSchema = {
 export const signInSchema = {
 	tags: ['Auth'],
 	summary: 'Login',
-	description: 'Authenticates with Supabase and returns access + refresh tokens together with the user profile.',
+	description:
+		'Authenticates with Supabase and returns access + refresh tokens together with the user profile.',
 	body: {
 		type: 'object',
 		required: ['email', 'password'],
 		properties: {
-			email:    { type: 'string', format: 'email' },
+			email: { type: 'string', format: 'email' },
 			password: { type: 'string' },
 		},
 	},
@@ -117,17 +118,23 @@ export const signInSchema = {
 		200: {
 			type: 'object',
 			properties: {
-				accessToken:  { type: 'string', description: 'JWT — include as Authorization: Bearer <token>' },
+				accessToken: {
+					type: 'string',
+					description: 'JWT — include as Authorization: Bearer <token>',
+				},
 				refreshToken: { type: 'string' },
-				expiresIn:    { type: 'integer', description: 'Seconds until the access token expires' },
+				expiresIn: {
+					type: 'integer',
+					description: 'Seconds until the access token expires',
+				},
 				user: {
 					type: 'object',
 					properties: {
-						id:        { type: 'string', format: 'uuid' },
-						email:     { type: 'string', format: 'email' },
+						id: { type: 'string', format: 'uuid' },
+						email: { type: 'string', format: 'email' },
 						firstName: { type: 'string' },
-						lastName:  { type: 'string' },
-						role:      { type: 'string' },
+						lastName: { type: 'string' },
+						role: { type: 'string' },
 						companyId: { type: 'string', format: 'uuid', nullable: true },
 					},
 				},
@@ -171,11 +178,14 @@ export const createInvitationSchema = {
 				invitation: {
 					type: 'object',
 					properties: {
-						id:         { type: 'string', format: 'uuid' },
-						email:      { type: 'string', format: 'email' },
-						role:       { type: 'string' },
-						expiresAt:  { type: 'string', format: 'date-time' },
-						inviteLink: { type: 'string', description: 'Full registration URL with token (for testing)' },
+						id: { type: 'string', format: 'uuid' },
+						email: { type: 'string', format: 'email' },
+						role: { type: 'string' },
+						expiresAt: { type: 'string', format: 'date-time' },
+						inviteLink: {
+							type: 'string',
+							description: 'Full registration URL with token (for testing)',
+						},
 					},
 				},
 			},
@@ -188,14 +198,15 @@ export const createInvitationSchema = {
 export const getInviteInfoSchema = {
 	tags: ['Auth'],
 	summary: 'Resolve invite info',
-	description: 'Returns invitation details (email, role, expiration date, and company info) based on the provided token.',
+	description:
+		'Returns invitation details (email, role, expiration date, and company info) based on the provided token.',
 	params: {
 		type: 'object',
 		required: ['token'],
 		properties: {
-			token: { 
-				type: 'string', 
-				description: 'Unique invitation token.' 
+			token: {
+				type: 'string',
+				description: 'Unique invitation token.',
 			},
 		},
 	},
@@ -203,13 +214,13 @@ export const getInviteInfoSchema = {
 		200: {
 			type: 'object',
 			properties: {
-				email:     { type: 'string', format: 'email' },
-				role:      { type: 'string' },
+				email: { type: 'string', format: 'email' },
+				role: { type: 'string' },
 				expiresAt: { type: 'string', format: 'date-time' },
 				company: {
 					type: 'object',
 					properties: {
-						id:   { type: 'string', format: 'uuid' },
+						id: { type: 'string', format: 'uuid' },
 						name: { type: 'string' },
 					},
 				},
@@ -237,7 +248,8 @@ export const getInviteInfoSchema = {
 export const getCompanyUsersSchema = {
 	tags: ['Auth'],
 	summary: 'List company members',
-	description: 'Admin-only endpoint that returns a list of all users belonging to the requester\'s company. Requires `Authorization: Bearer <access_token>`.',
+	description:
+		"Admin-only endpoint that returns a list of all users belonging to the requester's company. Requires `Authorization: Bearer <access_token>`.",
 	headers: {
 		type: 'object',
 		required: ['authorization'],
@@ -254,15 +266,15 @@ export const getCompanyUsersSchema = {
 					items: {
 						type: 'object',
 						properties: {
-							id:               { type: 'string', format: 'uuid' },
-							email:            { type: 'string', format: 'email' },
-							firstName:        { type: 'string' },
-							lastName:         { type: 'string' },
-							role:             { type: 'string' },
-							companyId:        { type: 'string', format: 'uuid', nullable: true },
+							id: { type: 'string', format: 'uuid' },
+							email: { type: 'string', format: 'email' },
+							firstName: { type: 'string' },
+							lastName: { type: 'string' },
+							role: { type: 'string' },
+							companyId: { type: 'string', format: 'uuid', nullable: true },
 							registrationData: { type: 'string' },
-							isActive:         { type: 'boolean' },
-							isOwner:          { type: 'boolean' },
+							isActive: { type: 'boolean' },
+							isOwner: { type: 'boolean' },
 						},
 					},
 				},
@@ -290,7 +302,8 @@ export const getCompanyUsersSchema = {
 export const getMeSchema = {
 	tags: ['Auth'],
 	summary: 'Get current user profile',
-	description: 'Returns the profile of the currently authenticated user along with their company details. Requires `Authorization: Bearer <access_token>`.',
+	description:
+		'Returns the profile of the currently authenticated user along with their company details. Requires `Authorization: Bearer <access_token>`.',
 	headers: {
 		type: 'object',
 		required: ['authorization'],
@@ -302,16 +315,16 @@ export const getMeSchema = {
 		200: {
 			type: 'object',
 			properties: {
-				id:               { type: 'string', format: 'uuid' },
-				email:            { type: 'string', format: 'email' },
-				firstName:        { type: 'string' },
-				lastName:         { type: 'string' },
-				role:             { type: 'string' },
-				companyId:        { type: 'string', format: 'uuid', nullable: true },
+				id: { type: 'string', format: 'uuid' },
+				email: { type: 'string', format: 'email' },
+				firstName: { type: 'string' },
+				lastName: { type: 'string' },
+				role: { type: 'string' },
+				companyId: { type: 'string', format: 'uuid', nullable: true },
 				registrationData: { type: 'string', format: 'date-time' },
 				isEmailConfirmed: { type: 'boolean' },
-				isActive:         { type: 'boolean' },
-				companyName:      { type: 'string' },
+				isActive: { type: 'boolean' },
+				companyName: { type: 'string' },
 			},
 		},
 		401: {
@@ -355,7 +368,8 @@ export const requestPasswordResetSchema = {
 export const updatePasswordSchema = {
 	tags: ['Auth'],
 	summary: 'Update password',
-	description: 'Updates the user password. Requires `Authorization: Bearer <recovery_token>` obtained from the email link.',
+	description:
+		'Updates the user password. Requires `Authorization: Bearer <recovery_token>` obtained from the email link.',
 	headers: {
 		type: 'object',
 		required: ['authorization'],
@@ -404,7 +418,7 @@ export const getPendingInvitationsSchema = {
 							email: { type: 'string', format: 'email' },
 							role: { type: 'string' },
 							expiresAt: { type: 'string', format: 'date-time' },
-							token: { type: 'string' }
+							token: { type: 'string' },
 						},
 					},
 				},
@@ -456,9 +470,9 @@ export const resendInvitationSchema = {
 	response: {
 		200: {
 			type: 'object',
-			properties: { 
+			properties: {
 				message: { type: 'string' },
-				expiresAt: { type: 'string', format: 'date-time' }
+				expiresAt: { type: 'string', format: 'date-time' },
 			},
 		},
 	},
@@ -484,7 +498,7 @@ export const updateUserRoleSchema = {
 		type: 'object',
 		required: ['role'],
 		properties: {
-			role: { type: 'string', enum: ['user', 'admin'] }
+			role: { type: 'string', enum: ['user', 'admin'] },
 		},
 	},
 	response: {
@@ -495,12 +509,12 @@ export const updateUserRoleSchema = {
 				user: {
 					type: 'object',
 					properties: {
-						id:       { type: 'string' },
-						email:    { type: 'string' },
-						role:     { type: 'string' },
+						id: { type: 'string' },
+						email: { type: 'string' },
+						role: { type: 'string' },
 						isActive: { type: 'boolean' },
-					}
-				}
+					},
+				},
 			},
 		},
 	},
@@ -511,7 +525,8 @@ export const updateUserRoleSchema = {
 export const updateUserStatusSchema = {
 	tags: ['Auth', 'Admin'],
 	summary: 'Activate or deactivate a user',
-	description: 'Admin-only. Sets the `isActive` flag for a user within the same company. Cannot be used on yourself.',
+	description:
+		'Admin-only. Sets the `isActive` flag for a user within the same company. Cannot be used on yourself.',
 	headers: {
 		type: 'object',
 		required: ['authorization'],
@@ -537,12 +552,12 @@ export const updateUserStatusSchema = {
 				user: {
 					type: 'object',
 					properties: {
-						id:       { type: 'string' },
-						email:    { type: 'string' },
-						role:     { type: 'string' },
+						id: { type: 'string' },
+						email: { type: 'string' },
+						role: { type: 'string' },
 						isActive: { type: 'boolean' },
-					}
-				}
+					},
+				},
 			},
 		},
 		400: {
