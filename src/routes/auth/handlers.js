@@ -6,6 +6,61 @@ import { randomBytes } from 'node:crypto';
 import { getSupabase } from '../../lib/supabase.js';
 
 // ==========================
+// Helper: resolve & verify admin
+// ==========================
+
+async function resolveAdmin(request, reply, { withCompany = false } = {}) {
+	const authHeader = request.headers.authorization ?? '';
+	const token = authHeader.replace(/^Bearer\s+/i, '').trim();
+
+	if (!token) {
+		reply.code(401).send({ error: 'Missing Authorization header.' });
+		return null;
+	}
+
+	const { client: supabase } = getSupabase();
+	const { data: { user: authUser }, error: userError } = await supabase.auth.getUser(token);
+
+	if (userError || !authUser) {
+		reply.code(401).send({ error: 'Invalid or expired token.' });
+		return null;
+	}
+
+	let query;
+
+	if (withCompany) {
+		query = db
+			.select({
+				id:          users.id,
+				role:        users.role,
+				companyId:   users.companyId,
+				firstName:   users.firstName,
+				lastName:    users.lastName,
+				companyName: companies.name,
+			})
+			.from(users)
+			.leftJoin(companies, eq(users.companyId, companies.id))
+			.where(eq(users.id, authUser.id))
+			.limit(1);
+	} else {
+		query = db
+			.select()
+			.from(users)
+			.where(eq(users.id, authUser.id))
+			.limit(1);
+	}
+
+	const [admin] = await query;
+
+	if (!admin || admin.role !== 'admin' || !admin.companyId) {
+		reply.code(403).send({ error: 'Admin access required.' });
+		return null;
+	}
+
+	return admin;
+}
+
+// ==========================
 // POST /auth/signUp-invite
 // ==========================
 
@@ -335,47 +390,10 @@ export async function signIn(request, reply) {
 export async function createInvitation(request, reply) {
 	const { email, role = 'user' } = request.body;
 
-	const authHeader = request.headers.authorization ?? '';
-	const token = authHeader.replace(/^Bearer\s+/i, '').trim();
-
-	if (!token) {
-		return reply.code(401).send({ error: 'Missing Authorization header.' });
-	}
+	const admin = await resolveAdmin(request, reply, { withCompany: true });
+	if (!admin) return;
 
 	const { client: supabase } = getSupabase();
-
-	const { data: { user: authUser }, error: userError } = await supabase.auth.getUser(token);
-
-	if (userError || !authUser) {
-		return reply.code(401).send({ error: 'Invalid or expired token.' });
-	}
-
-	// Load admin profile & verify they belong to a company
-	const [admin] = await db
-		.select({
-			id: users.id,
-			role: users.role,
-			companyId: users.companyId,
-			firstName: users.firstName,
-			lastName: users.lastName,
-			companyName: companies.name
-		})
-		.from(users)
-		.leftJoin(companies, eq(users.companyId, companies.id))
-		.where(eq(users.id, authUser.id))
-		.limit(1);
-
-	if (!admin) {
-		return reply.code(403).send({ error: 'User profile not found.' });
-	}
-
-	if (admin.role !== 'admin') {
-		return reply.code(403).send({ error: 'Only admins can send invitations.' });
-	}
-
-	if (!admin.companyId) {
-		return reply.code(403).send({ error: 'Admin is not associated with any company.' });
-	}
 
 	// Check for existing user or pending/expired/canceled invite
 	const [existingUser] = await db
@@ -536,53 +554,25 @@ export async function getInviteInfo(request, reply) {
 // ─── GET /auth/users ──────────────────────────────────────────────────────────
  
 export async function getCompanyUsers(request, reply) {
-	const authHeader = request.headers.authorization ?? '';
-	const token = authHeader.replace(/^Bearer\s+/i, '').trim();
- 
-	if (!token) {
-		return reply.code(401).send({ error: 'Missing Authorization header.' });
-	}
- 
-	const { client: supabase } = getSupabase();
- 
-	const { data: { user: authUser }, error: userError } = await supabase.auth.getUser(token);
+	const admin = await resolveAdmin(request, reply);
+	if (!admin) return;
 
-	if (userError || !authUser) {
-		return reply.code(401).send({ error: 'Invalid or expired token.' });
-	}
- 
-	const [requester] = await db
-		.select()
-		.from(users)
-		.where(eq(users.id, authUser.id))
-		.limit(1);
- 
-	if (!requester) {
-		return reply.code(403).send({ error: 'User profile not found.' });
-	}
-	
-	if (requester.isActive === false) {
+	if (admin.isActive === false) {
 		return reply.code(401).send({ error: 'Account deactivated.' });
 	}
 
-	if (requester.role !== 'admin') {
-		return reply.code(403).send({ error: 'Admin access required.' });
-	}
- 
-	if (!requester.companyId) {
-		return reply.code(403).send({ error: 'Not associated with a company.' });
-	}
- 
+	const { client: supabase } = getSupabase();
+
 	const [company] = await db
 		.select({ ownerId: companies.ownerId })
 		.from(companies)
-		.where(eq(companies.id, requester.companyId))
+		.where(eq(companies.id, admin.companyId))
 		.limit(1);
  
 	const members = await db
 		.select()
 		.from(users)
-		.where(eq(users.companyId, requester.companyId));
+		.where(eq(users.companyId, admin.companyId));
  
 	const enrichedMembers = members.map(m => ({
 		...m,
@@ -639,15 +629,15 @@ export async function getMe(request, reply) {
 	}
 
 	return reply.send({
-		id: result.id,
-		email: result.email,
-		firstName: result.firstName,
-		lastName: result.lastName,
-		role: result.role,
-		companyId: result.companyId,
+		id:               result.id,
+		email:            result.email,
+		firstName:        result.firstName,
+		lastName:         result.lastName,
+		role:             result.role,
+		companyId:        result.companyId,
 		registrationData: result.registrationData,
 		isEmailConfirmed: result.isEmailConfirmed,
-		companyName: result.companyName,
+		companyName:      result.companyName,
 	});
 }
 
@@ -683,6 +673,7 @@ export async function requestPasswordReset(request, reply) {
 
 	return reply.send({ message: 'A password reset link has been sent to your email' });
 }
+
 // ==========================
 // POST /auth/update-password
 // ==========================
@@ -720,29 +711,16 @@ export async function updatePassword(request, reply) {
 // ==========================
 
 export async function getPendingInvitations(request, reply) {
-	const authHeader = request.headers.authorization ?? '';
-	const token = authHeader.replace(/^Bearer\s+/i, '').trim();
-
-	if (!token) return reply.code(401).send({ error: 'Missing Authorization header.' });
-
-	const { client: supabase } = getSupabase();
-	const { data: { user: authUser }, error: userError } = await supabase.auth.getUser(token);
-
-	if (userError || !authUser) return reply.code(401).send({ error: 'Invalid or expired token.' });
-
-	const [admin] = await db.select().from(users).where(eq(users.id, authUser.id)).limit(1);
-
-	if (!admin || admin.role !== 'admin' || !admin.companyId) {
-		return reply.code(403).send({ error: 'Admin access required.' });
-	}
+	const admin = await resolveAdmin(request, reply);
+	if (!admin) return;
 
 	const pendingInvites = await db
 		.select({
-			id: invitations.id,
-			email: invitations.email,
-			role: invitations.role,
+			id:        invitations.id,
+			email:     invitations.email,
+			role:      invitations.role,
 			expiresAt: invitations.expiresAt,
-			token: invitations.token
+			token:     invitations.token
 		})
 		.from(invitations)
 		.where(
@@ -761,21 +739,11 @@ export async function getPendingInvitations(request, reply) {
 
 export async function cancelInvitation(request, reply) {
 	const { id } = request.params;
-	const authHeader = request.headers.authorization ?? '';
-	const token = authHeader.replace(/^Bearer\s+/i, '').trim();
 
-	if (!token) return reply.code(401).send({ error: 'Missing Authorization header.' });
+	const admin = await resolveAdmin(request, reply);
+	if (!admin) return;
 
 	const { client: supabase } = getSupabase();
-	const { data: { user: authUser }, error: userError } = await supabase.auth.getUser(token);
-
-	if (userError || !authUser) return reply.code(401).send({ error: 'Invalid or expired token.' });
-
-	const [admin] = await db.select().from(users).where(eq(users.id, authUser.id)).limit(1);
-
-	if (!admin || admin.role !== 'admin' || !admin.companyId) {
-		return reply.code(403).send({ error: 'Admin access required.' });
-	}
 
 	const [canceledInvite] = await db
 		.update(invitations)
@@ -822,33 +790,11 @@ export async function cancelInvitation(request, reply) {
 
 export async function resendInvitation(request, reply) {
 	const { id } = request.params;
-	const authHeader = request.headers.authorization ?? '';
-	const token = authHeader.replace(/^Bearer\s+/i, '').trim();
 
-	if (!token) return reply.code(401).send({ error: 'Missing Authorization header.' });
+	const admin = await resolveAdmin(request, reply, { withCompany: true });
+	if (!admin) return;
 
 	const { client: supabase } = getSupabase();
-	const { data: { user: authUser }, error: userError } = await supabase.auth.getUser(token);
-
-	if (userError || !authUser) return reply.code(401).send({ error: 'Invalid or expired token.' });
-
-	const [admin] = await db
-		.select({
-			id: users.id,
-			role: users.role,
-			companyId: users.companyId,
-			firstName: users.firstName,
-			lastName: users.lastName,
-			companyName: companies.name
-		})
-		.from(users)
-		.leftJoin(companies, eq(users.companyId, companies.id))
-		.where(eq(users.id, authUser.id))
-		.limit(1);
-
-	if (!admin || admin.role !== 'admin' || !admin.companyId) {
-		return reply.code(403).send({ error: 'Admin access required.' });
-	}
 
 	const [invite] = await db
 		.select()
@@ -925,21 +871,9 @@ export async function resendInvitation(request, reply) {
 export async function updateUserRole(request, reply) {
 	const { userId } = request.params;
 	const { role } = request.body;
-	const authHeader = request.headers.authorization ?? '';
-	const token = authHeader.replace(/^Bearer\s+/i, '').trim();
 
-	if (!token) return reply.code(401).send({ error: 'Missing Authorization header.' });
-
-	const { client: supabase } = getSupabase();
-	const { data: { user: authUser }, error: userError } = await supabase.auth.getUser(token);
-
-	if (userError || !authUser) return reply.code(401).send({ error: 'Invalid or expired token.' });
-
-	const [admin] = await db.select().from(users).where(eq(users.id, authUser.id)).limit(1);
-
-	if (!admin || admin.role !== 'admin' || !admin.companyId) {
-		return reply.code(403).send({ error: 'Admin access required.' });
-	}
+	const admin = await resolveAdmin(request, reply);
+	if (!admin) return;
 
 	if (admin.id === userId) {
 		return reply.code(400).send({ error: 'You cannot change your own role.' });
@@ -983,9 +917,9 @@ export async function updateUserRole(request, reply) {
 	return reply.send({
 		message: 'User role updated successfully.',
 		user: {
-			id: updatedUser.id,
+			id:    updatedUser.id,
 			email: updatedUser.email,
-			role: updatedUser.role,
+			role:  updatedUser.role,
 		}
 	});
 }
@@ -997,21 +931,9 @@ export async function updateUserRole(request, reply) {
 export async function updateUserStatus(request, reply) {
 	const { userId } = request.params;
 	const { isActive } = request.body;
-	const authHeader = request.headers.authorization ?? '';
-	const token = authHeader.replace(/^Bearer\s+/i, '').trim();
- 
-	if (!token) return reply.code(401).send({ error: 'Missing Authorization header.' });
- 
-	const { client: supabase } = getSupabase();
-	const { data: { user: authUser }, error: userError } = await supabase.auth.getUser(token);
- 
-	if (userError || !authUser) return reply.code(401).send({ error: 'Invalid or expired token.' });
- 
-	const [admin] = await db.select().from(users).where(eq(users.id, authUser.id)).limit(1);
- 
-	if (!admin || admin.role !== 'admin' || !admin.companyId) {
-		return reply.code(403).send({ error: 'Admin access required.' });
-	}
+
+	const admin = await resolveAdmin(request, reply);
+	if (!admin) return;
  
 	if (admin.id === userId) {
 		return reply.code(400).send({ error: 'You cannot change your own status.' });
