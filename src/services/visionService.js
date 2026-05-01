@@ -1,4 +1,4 @@
-import { requireAnthropic } from "../lib/cloudeClient.js";
+import { requireAnthropic } from '../lib/cloudeClient.js';
 
 // ==========================
 // Claude client
@@ -29,68 +29,68 @@ const buildSystemPrompt = (imageType) => {
 		'- If labels unclear or too small — set hazardClass to null and lower confidence. Do NOT guess.\n\n';
 
 	if (imageType === 'bolPhoto') {
-        return (
-            'You are a strict computer vision assistant for a Hazmat Load Audit System. ' +
-            'You will receive exactly ONE image of a BOL / shipping paper document. ' +
-            'Follow these steps EXACTLY:\n\n' +
-            'STEP 1: STRICT TEXT PARSING (ANTI-HALLUCINATION)\n' +
-            '- Act as a literal text scanner. DO NOT use your internal hazmat database. DO NOT autocomplete or guess.\n' +
-            '- Find the letters "UN" or "NA" in the description. Extract EXACTLY the 4 digits physically printed immediately after them.\n' +
-            '- NEVER alter the printed UN number to match the Proper Shipping Name.\n' +
-            '- Hazard Class: Extract the primary hazard class AND any subsidiary classes in parentheses. ' +
+		return (
+			'You are a strict computer vision assistant for a Hazmat Load Audit System. ' +
+			'You will receive exactly ONE image of a BOL / shipping paper document. ' +
+			'Follow these steps EXACTLY:\n\n' +
+			'STEP 1: STRICT TEXT PARSING (ANTI-HALLUCINATION)\n' +
+			'- Act as a literal text scanner. DO NOT use your internal hazmat database. DO NOT autocomplete or guess.\n' +
+			'- Find the letters "UN" or "NA" in the description. Extract EXACTLY the 4 digits physically printed immediately after them.\n' +
+			'- NEVER alter the printed UN number to match the Proper Shipping Name.\n' +
+			'- Hazard Class: Extract the primary hazard class AND any subsidiary classes in parentheses. ' +
 			'FORMATTING RULE: You MUST remove any commas or spaces immediately preceding the parenthesis. ' +
 			'Always format strictly as "Primary(Subsidiary)", for example, convert "5.2,(8)" or "5.1, (8)" to exactly "5.2(8)" or "5.1(8)". ' +
 			'CRITICAL SEPARATION RULE: If the Packing Group is printed right next to the class (e.g., "8,II" or "5.1(8),II"), ' +
 			'extract ONLY the hazard class portion into this field and put the Roman numerals into the packingGroup field. ' +
 			'NEVER concatenate classes from multiple different cargo rows into a single string.\n\n' +
-            'STEP 2: EXTRACT REMAINING FIELDS\n' +
-            '- Packing Group: Roman numerals (I, II, III) where required.\n' +
-            '- HM Column Marking: "X" or "RQ" marking in hazardous material column.\n' +
-            '- Emergency Phone: Extract ALL visible 24-Hour monitored phone numbers. You MUST put all found numbers in "mainValue" separated by a semicolon (e.g., "+1-800-424-9300; +1-703-527-3887"). In "meaning", specify the purpose of each number respectively (e.g., "USA; International").\n' +
-            '- Shipper Certification: Check if the signature block at the bottom is signed.\n\n' +
-            'FIELD DEFINITIONS (CRITICAL):\n' +
-            '- properShippingName: Extract the EXACT text of the Proper Shipping Name printed on the document (e.g., "TOLUENE", "COATING SOLUTION", "CORROSIVE LIQUID, N.O.S."). Do not alter, guess, or abbreviate the text.\n' +
-            '- entrySequenceCompliant: true if entry follows DOT order (name → class → UN → PG). false if order differs. null if uncertain.\n' +
-            '- sealNumber: Look for "SEAL#", "Seal Number", or handwritten seal numbers. Extract the exact alphanumeric string. null if not found.\n' +
+			'STEP 2: EXTRACT REMAINING FIELDS\n' +
+			'- Packing Group: Roman numerals (I, II, III) where required.\n' +
+			'- HM Column Marking: "X" or "RQ" marking in hazardous material column.\n' +
+			'- Emergency Phone: Extract ALL visible 24-Hour monitored phone numbers. You MUST put all found numbers in "mainValue" separated by a semicolon (e.g., "+1-800-424-9300; +1-703-527-3887"). In "meaning", specify the purpose of each number respectively (e.g., "USA; International").\n' +
+			'- Shipper Certification: Check if the signature block at the bottom is signed.\n\n' +
+			'FIELD DEFINITIONS (CRITICAL):\n' +
+			'- properShippingName: Extract the EXACT text of the Proper Shipping Name printed on the document (e.g., "TOLUENE", "COATING SOLUTION", "CORROSIVE LIQUID, N.O.S."). Do not alter, guess, or abbreviate the text.\n' +
+			'- entrySequenceCompliant: true if entry follows DOT order (name → class → UN → PG). false if order differs. null if uncertain.\n' +
+			'- sealNumber: Look for "SEAL#", "Seal Number", or handwritten seal numbers. Extract the exact alphanumeric string. null if not found.\n' +
 			'- hmColumnMarked: STRICT RULE. Search ONLY the data row under the HM column. ' +
 			'If the cell on the data row is visually blank or empty, you MUST return false. ' +
 			'DO NOT count the "X" in the column header "HM(X)". ' +
 			'DO NOT count the letter "X" inside normal words like "TX", "BOX", or "MEXICO". ' +
 			'Only return true if a standalone "X" or "RQ" is intentionally entered for that specific cargo line. ' +
 			'Set true if ANY "X" or "RQ" is found specifically on the hazmat line row data, NOT the header.\n' +
-            'MULTIPLE HAZMAT ENTRIES:\n' +
-            '- If this document shows TWO OR MORE distinct hazmat line items, return a SEPARATE object for each.\n' +
-            '- PAIRING RULE: pair each UN number with its corresponding hazard class and packing group from that specific line item.\n\n' +
-            HAZMAT_CLASS_REFERENCE +
-            'CRITICAL OUTPUT RULE:\n' +
-            '- ONE hazmat entry → single JSON object.\n' +
-            '- TWO OR MORE hazmat entries → JSON ARRAY of objects, one per entry.\n' +
-            '- STRICT SCHEMA RULE: The "extracted" field MUST NEVER BE AN ARRAY. If you have multiple entries, return a ROOT array of objects, like this:\n' +
-            '  [ { "slotName": "bol", "extracted": {...} }, { "slotName": "bol", "extracted": {...} } ]\n' +
-            '- Never use comma-separated UN numbers or hazard classes inside a single object.\n' +
+			'MULTIPLE HAZMAT ENTRIES:\n' +
+			'- If this document shows TWO OR MORE distinct hazmat line items, return a SEPARATE object for each.\n' +
+			'- PAIRING RULE: pair each UN number with its corresponding hazard class and packing group from that specific line item.\n\n' +
+			HAZMAT_CLASS_REFERENCE +
+			'CRITICAL OUTPUT RULE:\n' +
+			'- ONE hazmat entry → single JSON object.\n' +
+			'- TWO OR MORE hazmat entries → JSON ARRAY of objects, one per entry.\n' +
+			'- STRICT SCHEMA RULE: The "extracted" field MUST NEVER BE AN ARRAY. If you have multiple entries, return a ROOT array of objects, like this:\n' +
+			'  [ { "slotName": "bol", "extracted": {...} }, { "slotName": "bol", "extracted": {...} } ]\n' +
+			'- Never use comma-separated UN numbers or hazard classes inside a single object.\n' +
 			'- TOKEN LIMIT PREVENTION: Keep "meaning" strings concise but highly specific (approx 10-15 words). Include exact evidence (e.g., "Standalone X found in HM column for UN1866"). DO NOT use conversational filler phrases like "Extracted exactly as printed".\n' +
-            '- Leave "otherNotes" empty [] UNLESS there is a critical DOT violation not covered by other fields. Do not extract Qty or Gross Weight into notes.\n\n' +
-            'Respond ONLY with this JSON shape:\n' +
-            '{\n' +
-            '  "slotName": "bol",\n' +
-            '    "extracted": {\n' +
-            '      "isValid":                    { "mainValue": false,  "meaning": "" },\n' +
-            '      "properShippingName":         { "mainValue": null,   "meaning": "" },\n' +
-            '      "unNumber":                   { "mainValue": null,   "meaning": "" },\n' +
-            '      "hazardClass":                { "mainValue": null,   "meaning": "" },\n' +
-            '      "packingGroup":               { "mainValue": null,   "meaning": "" },\n' +
-            '      "emergencyPhone":             { "mainValue": null,   "meaning": "" },\n' +
-            '      "hmColumnMarked":             { "mainValue": false,  "meaning": "" },\n' +
-            '      "shipperCertificationPresent":{ "mainValue": false,  "meaning": "" },\n' +
-            '      "entrySequenceCompliant":     { "mainValue": false,  "meaning": "" },\n' +
+			'- Leave "otherNotes" empty [] UNLESS there is a critical DOT violation not covered by other fields. Do not extract Qty or Gross Weight into notes.\n\n' +
+			'Respond ONLY with this JSON shape:\n' +
+			'{\n' +
+			'  "slotName": "bol",\n' +
+			'    "extracted": {\n' +
+			'      "isValid":                    { "mainValue": false,  "meaning": "" },\n' +
+			'      "properShippingName":         { "mainValue": null,   "meaning": "" },\n' +
+			'      "unNumber":                   { "mainValue": null,   "meaning": "" },\n' +
+			'      "hazardClass":                { "mainValue": null,   "meaning": "" },\n' +
+			'      "packingGroup":               { "mainValue": null,   "meaning": "" },\n' +
+			'      "emergencyPhone":             { "mainValue": null,   "meaning": "" },\n' +
+			'      "hmColumnMarked":             { "mainValue": false,  "meaning": "" },\n' +
+			'      "shipperCertificationPresent":{ "mainValue": false,  "meaning": "" },\n' +
+			'      "entrySequenceCompliant":     { "mainValue": false,  "meaning": "" },\n' +
 			'      "sealNumber":                 { "mainValue": null,   "meaning": "" },\n' +
-            '      "otherNotes": []\n' +
-            '    },\n' +
-            '    "confidence": { "overall": 0.0, "fields": {} },\n' +
-            '  "notes": []\n' +
-            '}'
-        );
-    }
+			'      "otherNotes": []\n' +
+			'    },\n' +
+			'    "confidence": { "overall": 0.0, "fields": {} },\n' +
+			'  "notes": []\n' +
+			'}'
+		);
+	}
 
 	if (imageType === 'markerPhoto') {
 		return (
@@ -209,7 +209,7 @@ const buildSystemPrompt = (imageType) => {
 		'  "notes": []\n' +
 		'}'
 	);
-}
+};
 
 const bolHelper = async (bolFiles) => {
 	if (!bolFiles || bolFiles.length === 0) {
@@ -244,16 +244,19 @@ const bolHelper = async (bolFiles) => {
 	try {
 		const response = await getClient().messages.create({
 			model: process.env.CLAUDE_VISION_MODEL,
-			max_tokens: 512, 
+			max_tokens: 512,
 			system: TRIAGE_SYSTEM_PROMPT,
 			messages: [
 				{
 					role: 'user',
 					content: [
 						...imageContents,
-						{ type: 'text', text: 'Review all pages, determine if hazmat is present, and extract the weights.' },
+						{
+							type: 'text',
+							text: 'Review all pages, determine if hazmat is present, and extract the weights.',
+						},
 					],
-				}
+				},
 			],
 		});
 
@@ -269,35 +272,64 @@ const bolHelper = async (bolFiles) => {
 		if (!objMatch) throw new Error(`No JSON object found in response: ${clean.slice(0, 100)}`);
 
 		const parsed = JSON.parse(objMatch[0]);
-		
+
 		return {
 			isHazmat: parsed.isHazmat === true,
-			weights: Array.isArray(parsed.weights) ? parsed.weights : []
+			weights: Array.isArray(parsed.weights) ? parsed.weights : [],
 		};
-
 	} catch (err) {
 		console.error('[bolHelper] Error:', err.message);
-		return { isHazmat: true, weights: [] }; 
+		return { isHazmat: true, weights: [] };
 	}
-}
+};
 
 // Keys used for deduplication per slot type (compared by mainValue, otherNotes excluded)
 const DEDUP_KEYS = {
-	bol:     ['isValid', 'unNumber', 'hazardClass', 'packingGroup', 'emergencyPhone',
-	          'hmColumnMarked', 'shipperCertificationPresent', 'entrySequenceCompliant', 'properShippingName', 'sealNumber'],
-	placard: ['isValid', 'unNumber', 'hazardClass', 'placardCondition', 'correctOrientation', 'fourSidedPlacementVerified'],
-	intrier: ['isValid', 'unNumber', 'hazardClass', 'packageLabelsPresent', 'loadSecured', 'securementType', 'palletUsed', 'noShiftingHazards'],
-	seal:    ['sealNumber'],
+	bol: [
+		'isValid',
+		'unNumber',
+		'hazardClass',
+		'packingGroup',
+		'emergencyPhone',
+		'hmColumnMarked',
+		'shipperCertificationPresent',
+		'entrySequenceCompliant',
+		'properShippingName',
+		'sealNumber',
+	],
+	placard: [
+		'isValid',
+		'unNumber',
+		'hazardClass',
+		'placardCondition',
+		'correctOrientation',
+		'fourSidedPlacementVerified',
+	],
+	intrier: [
+		'isValid',
+		'unNumber',
+		'hazardClass',
+		'packageLabelsPresent',
+		'loadSecured',
+		'securementType',
+		'palletUsed',
+		'noShiftingHazards',
+	],
+	seal: ['sealNumber'],
 };
 
 const extractionFingerprint = (result) => {
-	const keys = DEDUP_KEYS[result.slotName] ?? Object.keys(result.extracted ?? {}).filter((k) => k !== 'otherNotes');
+	const keys =
+		DEDUP_KEYS[result.slotName] ??
+		Object.keys(result.extracted ?? {}).filter((k) => k !== 'otherNotes');
 	const ext = result.extracted ?? {};
-	return keys.map((k) => {
-		const val = ext[k]?.mainValue ?? null;
-		return `${k}:${val === null ? '__null__' : String(val).trim().toLowerCase()}`;
-	}).join('|');
-}
+	return keys
+		.map((k) => {
+			const val = ext[k]?.mainValue ?? null;
+			return `${k}:${val === null ? '__null__' : String(val).trim().toLowerCase()}`;
+		})
+		.join('|');
+};
 
 const deduplicateResults = (results) => {
 	const seen = new Set();
@@ -307,7 +339,7 @@ const deduplicateResults = (results) => {
 		seen.add(fp);
 		return true;
 	});
-}
+};
 
 // ==========================
 // Claude API calls
@@ -329,12 +361,14 @@ const callClaude = async (systemPrompt, file, userText) => {
 							type: 'image',
 							source: {
 								type: 'url',
-								url: file.url
+								url: file.url,
 							},
 						},
-						{ 
-							type: 'text', 
-							text: userText + '\n\nCRITICAL: Respond STRICTLY with raw JSON. Start your response immediately with { or [. DO NOT wrap in ```json markdown. NO explanations, NO preamble, NO conversational text.' 
+						{
+							type: 'text',
+							text:
+								userText +
+								'\n\nCRITICAL: Respond STRICTLY with raw JSON. Start your response immediately with { or [. DO NOT wrap in ```json markdown. NO explanations, NO preamble, NO conversational text.',
 						},
 					],
 				},
@@ -352,11 +386,11 @@ const callClaude = async (systemPrompt, file, userText) => {
 	let parsed;
 	try {
 		const objMatch = textBlock.text.match(/(\{[\s\S]*\}|\[[\s\S]*\])/);
-		
+
 		if (!objMatch) {
 			throw new Error('No JSON structure found in response.');
 		}
-		
+
 		parsed = JSON.parse(objMatch[1]);
 	} catch (parseErr) {
 		console.error('[callClaude] JSON parse error:', parseErr.message);
@@ -373,24 +407,27 @@ const callClaude = async (systemPrompt, file, userText) => {
 
 	for (const result of results) {
 		if (typeof result !== 'object' || result === null || typeof result.extracted !== 'object') {
-			throw Object.assign(new Error('Claude response does not match expected schema.'), { statusCode: 502 });
+			throw Object.assign(new Error('Claude response does not match expected schema.'), {
+				statusCode: 502,
+			});
 		}
 	}
 
 	return results;
-}
+};
 
 // files — array of { _buf, mimetype }; each file is sent as a separate request and results are collected
 const analyzeImageWithClaude = async (files, imageType) => {
-	const userText = imageType === 'bolPhoto'
-		? 'Carefully examine every part of this BOL document. ' +
-		  'Find and extract: UN number (4 digits after "UN" or "NA"), ' +
-		  'hazard class (number like 2, 2.2, 3, 8, 9), ' +
-		  'packing group (Roman numerals I, II, III), ' +
-		  'HM column marking: look for X or RQ in the narrow "HM(X)" column on the cargo line itself, not the header row. ' +
-		  'These may be in narrow columns, inline in description text, handwritten, or small print. ' +
-		  'Report ONLY what you actually read from this document. Respond ONLY with JSON.'
-		: 'Analyze this image and respond ONLY with JSON.';
+	const userText =
+		imageType === 'bolPhoto'
+			? 'Carefully examine every part of this BOL document. ' +
+				'Find and extract: UN number (4 digits after "UN" or "NA"), ' +
+				'hazard class (number like 2, 2.2, 3, 8, 9), ' +
+				'packing group (Roman numerals I, II, III), ' +
+				'HM column marking: look for X or RQ in the narrow "HM(X)" column on the cargo line itself, not the header row. ' +
+				'These may be in narrow columns, inline in description text, handwritten, or small print. ' +
+				'Report ONLY what you actually read from this document. Respond ONLY with JSON.'
+			: 'Analyze this image and respond ONLY with JSON.';
 
 	const systemPrompt = buildSystemPrompt(imageType);
 
@@ -403,7 +440,7 @@ const analyzeImageWithClaude = async (files, imageType) => {
 	const results = nestedResults.flat();
 
 	return deduplicateResults(results);
-}
+};
 
 // ==========================
 // Image classification
@@ -442,7 +479,7 @@ const classifyImage = async (file) => {
 							type: 'image',
 							source: {
 								type: 'url',
-								url:  file.url,
+								url: file.url,
 							},
 						},
 						{ type: 'text', text: 'Classify this image.' },
@@ -451,12 +488,16 @@ const classifyImage = async (file) => {
 			],
 		});
 	} catch (err) {
-		throw Object.assign(new Error(`Claude classify error: ${err.message}`), { statusCode: 502 });
+		throw Object.assign(new Error(`Claude classify error: ${err.message}`), {
+			statusCode: 502,
+		});
 	}
 
 	const textBlock = response.content.find((b) => b.type === 'text');
 	if (!textBlock?.text) {
-		throw Object.assign(new Error('Claude returned empty classification response.'), { statusCode: 502 });
+		throw Object.assign(new Error('Claude returned empty classification response.'), {
+			statusCode: 502,
+		});
 	}
 
 	let parsed;
@@ -468,7 +509,9 @@ const classifyImage = async (file) => {
 		}
 		parsed = JSON.parse(clean);
 	} catch (e) {
-		throw Object.assign(new Error(`Failed to parse classification JSON: ${e.message}`), { statusCode: 502 });
+		throw Object.assign(new Error(`Failed to parse classification JSON: ${e.message}`), {
+			statusCode: 502,
+		});
 	}
 
 	const VALID_TYPES = ['bolPhoto', 'markerPhoto', 'cargoPhoto', 'sealPhoto'];
@@ -480,7 +523,7 @@ const classifyImage = async (file) => {
 	}
 
 	return parsed.imageType;
-}
+};
 
 /**
  * 1. Classifies every file in parallel.
@@ -495,27 +538,45 @@ export const classifyAndAnalyzeAll = async (files) => {
 			return { file: f, imageType };
 		}),
 	);
- 
+
 	const groups = { bolPhoto: [], markerPhoto: [], cargoPhoto: [], sealPhoto: [] };
 	for (const { file, imageType } of classifiedFiles) {
 		groups[imageType].push(file);
 	}
- 
+
 	const [helperResult, bolResults, markerResults, cargoResults, sealResults] = await Promise.all([
-		groups.bolPhoto.length ? bolHelper(groups.bolPhoto) : Promise.resolve({ isHazmat: true, weights: [] }),
-		groups.bolPhoto.length    ? analyzeImageWithClaude(groups.bolPhoto,    'bolPhoto')    : Promise.resolve([]),
-		groups.markerPhoto.length ? analyzeImageWithClaude(groups.markerPhoto, 'markerPhoto') : Promise.resolve([]),
-		groups.cargoPhoto.length  ? analyzeImageWithClaude(groups.cargoPhoto,  'cargoPhoto')  : Promise.resolve([]),
-		groups.sealPhoto.length   ? analyzeImageWithClaude(groups.sealPhoto,   'sealPhoto')   : Promise.resolve([]),
+		groups.bolPhoto.length
+			? bolHelper(groups.bolPhoto)
+			: Promise.resolve({ isHazmat: true, weights: [] }),
+		groups.bolPhoto.length
+			? analyzeImageWithClaude(groups.bolPhoto, 'bolPhoto')
+			: Promise.resolve([]),
+		groups.markerPhoto.length
+			? analyzeImageWithClaude(groups.markerPhoto, 'markerPhoto')
+			: Promise.resolve([]),
+		groups.cargoPhoto.length
+			? analyzeImageWithClaude(groups.cargoPhoto, 'cargoPhoto')
+			: Promise.resolve([]),
+		groups.sealPhoto.length
+			? analyzeImageWithClaude(groups.sealPhoto, 'sealPhoto')
+			: Promise.resolve([]),
 	]);
- 
+
 	// Return classifiedFiles so createAudit can tag each image URL with its slot type
-	return { bolResults, markerResults, cargoResults, sealResults, classifiedFiles, isGlobalHazmat: helperResult.isHazmat, bolWeights: helperResult.weights };
-}
+	return {
+		bolResults,
+		markerResults,
+		cargoResults,
+		sealResults,
+		classifiedFiles,
+		isGlobalHazmat: helperResult.isHazmat,
+		bolWeights: helperResult.weights,
+	};
+};
 
 export const IMAGE_TYPE_TO_SLOT = {
-	bolPhoto:    'bol',
+	bolPhoto: 'bol',
 	markerPhoto: 'placard',
-	cargoPhoto:  'cargo',
-	sealPhoto:   'seal',
+	cargoPhoto: 'cargo',
+	sealPhoto: 'seal',
 };
